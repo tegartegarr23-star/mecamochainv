@@ -26,7 +26,8 @@ export type NavTab =
   | 'recipes'
   | 'transactions'
   | 'reports'
-  | 'users';
+  | 'users'
+  | 'sql_editor';
 
 interface SidebarProps {
   activeTab: NavTab;
@@ -37,7 +38,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpen, setIsOpen, onLogout }) => {
-  const { currentUser, isSuperAdmin, resetToDefaultData } = useInventory();
+  const { currentUser, isSuperAdmin } = useInventory();
 
   const navItems = [
     {
@@ -69,6 +70,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpe
       label: 'Laporan & Mutasi',
       icon: FileSpreadsheet,
       badge: null,
+    },
+    {
+      id: 'sql_editor' as NavTab,
+      label: 'SQL Editor Supabase',
+      icon: Database,
+      badge: 'SQL',
     },
     ...(isSuperAdmin
       ? [

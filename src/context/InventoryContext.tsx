@@ -705,7 +705,35 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     localStorage.clear();
   };
 
-  const generateSupabaseSQL = () => {
+  const generateSupabaseSQL = (): string => {
+    const unitInserts = units
+      .map(
+        (u) =>
+          `  ('${u.id.replace(/'/g, "''")}', '${u.name.replace(/'/g, "''")}', '${u.abbreviation.replace(
+            /'/g,
+            "''"
+          )}')`
+      )
+      .join(',\n');
+
+    const categoryInserts = categories
+      .map((c) => `  ('${c.id.replace(/'/g, "''")}', '${c.name.replace(/'/g, "''")}')`)
+      .join(',\n');
+
+    const ingredientInserts = ingredients
+      .map(
+        (ing) =>
+          `  ('${ing.id.replace(/'/g, "''")}', '${ing.code.replace(/'/g, "''")}', '${ing.name.replace(
+            /'/g,
+            "''"
+          )}', ${ing.category_id ? `'${ing.category_id}'` : 'NULL'}, ${
+            ing.unit_id ? `'${ing.unit_id}'` : 'NULL'
+          }, '${ing.type}', ${ing.min_stock || 0}, ${ing.current_stock || 0}, ${
+            ing.is_active ? 'TRUE' : 'FALSE'
+          }, ${ing.cost_per_unit || 0})`
+      )
+      .join(',\n');
+
     return `-- MECAMOCHA INVENTORY SYSTEM - SUPABASE DATABASE MIGRATION SCRIPT
 -- Execute this script in your Supabase SQL Editor
 
@@ -825,6 +853,27 @@ CREATE TRIGGER trg_update_stock
 AFTER INSERT ON public.stock_movements
 FOR EACH ROW
 EXECUTE FUNCTION update_ingredient_current_stock();
+
+-- ===================================================
+-- SEED DATA INSERTS (UNITS, CATEGORIES, INGREDIENTS)
+-- ===================================================
+INSERT INTO public.units (id, name, abbreviation) VALUES
+${unitInserts}
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, abbreviation = EXCLUDED.abbreviation;
+
+INSERT INTO public.categories (id, name) VALUES
+${categoryInserts}
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
+
+INSERT INTO public.ingredients (id, code, name, category_id, unit_id, type, min_stock, current_stock, is_active, cost_per_unit) VALUES
+${ingredientInserts}
+ON CONFLICT (code) DO UPDATE SET
+  name = EXCLUDED.name,
+  category_id = EXCLUDED.category_id,
+  unit_id = EXCLUDED.unit_id,
+  type = EXCLUDED.type,
+  min_stock = EXCLUDED.min_stock,
+  is_active = EXCLUDED.is_active;
 `;
   };
 
