@@ -3,13 +3,9 @@ import {
   Coffee,
   Lock,
   Mail,
-  ShieldCheck,
-  UserCheck,
   ArrowRight,
   Eye,
   EyeOff,
-  ChefHat,
-  Sparkles,
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react';
@@ -43,25 +39,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         onLoginSuccess();
       } else {
         setIsLoading(false);
-        setErrorMsg('Email atau password tidak ditemukan. Silakan pilih salah satu akun demo staf di bawah.');
+        setErrorMsg('Email atau password tidak ditemukan. Periksa kembali data login Anda.');
       }
     }, 400);
-  };
-
-  const handleQuickLogin = (userEmail: string) => {
-    setErrorMsg('');
-    setIsLoading(true);
-    setTimeout(() => {
-      const targetUser = users.find((u) => u.email.toLowerCase() === userEmail.toLowerCase());
-      if (targetUser) {
-        setCurrentUser(targetUser);
-        setIsLoading(false);
-        onLoginSuccess();
-      } else {
-        setIsLoading(false);
-        setErrorMsg('Akun pengguna tidak ditemukan.');
-      }
-    }, 300);
   };
 
   return (
@@ -190,63 +170,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               )}
             </button>
           </form>
-
-          {/* Quick Login Options */}
-          <div className="pt-4 border-t border-slate-800/80 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                Pilih Akun Demo Staf Cafe
-              </span>
-              <span className="text-[10px] text-slate-500">Klik Instan</span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-2">
-              {/* Admin Demo Button */}
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('admin@mecamocha.id')}
-                className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-950 hover:bg-slate-800/90 border border-slate-800 hover:border-amber-500/50 transition-all text-left group"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20 group-hover:scale-105 transition-transform">
-                    <ShieldCheck className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-200 group-hover:text-amber-300">
-                      Super Admin (Owner / Manager)
-                    </p>
-                    <p className="text-[10px] text-slate-400 font-mono">admin@mecamocha.id</p>
-                  </div>
-                </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  Akses Penuh
-                </span>
-              </button>
-
-              {/* Staff Demo Button */}
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('karyawan@mecamocha.id')}
-                className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-950 hover:bg-slate-800/90 border border-slate-800 hover:border-emerald-500/50 transition-all text-left group"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20 group-hover:scale-105 transition-transform">
-                    <ChefHat className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-200 group-hover:text-emerald-300">
-                      Budi (Staff Kitchen & Barista)
-                    </p>
-                    <p className="text-[10px] text-slate-400 font-mono">karyawan@mecamocha.id</p>
-                  </div>
-                </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  Akses Transaksi
-                </span>
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Security Footer Note */}
