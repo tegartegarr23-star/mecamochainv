@@ -41,10 +41,6 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setIsOpenSidebar, onO
       title: 'Laporan Stok & Mutasi',
       subtitle: 'Rekap stok harian dan buku besar mutasi per bahan baku (Ledger)',
     },
-    sql_editor: {
-      title: 'SQL Editor & Supabase Migration',
-      subtitle: 'Eksekusi query SQL, salin DDL/Seed data 130 bahan baku, & atur integrasi Supabase',
-    },
     users: {
       title: 'Manajemen User & Hak Akses',
       subtitle: 'Kelola pengguna sistem dan hak akses khusus Super Admin',

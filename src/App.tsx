@@ -8,7 +8,6 @@ import { MenusManager } from './components/Menus/MenusManager';
 import { TransactionsView } from './components/Transactions/TransactionsView';
 import { ReportsView } from './components/Reports/ReportsView';
 import { UserManager } from './components/Users/UserManager';
-import { SupabaseModal } from './components/SupabaseModal';
 import { LoginPage } from './components/LoginPage';
 
 function MainApp() {
@@ -85,8 +84,6 @@ function MainApp() {
           )}
 
           {activeTab === 'reports' && <ReportsView />}
-
-          {activeTab === 'sql_editor' && <SupabaseModal />}
 
           {activeTab === 'users' && <UserManager />}
         </main>
