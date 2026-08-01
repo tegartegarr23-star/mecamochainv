@@ -1,0 +1,6 @@
+{
+  "name": "Mecamocha Inventory System",
+  "description": "F&B Inventory Management System for Mecamocha featuring stock tracking, recipe conversion (prepare), menu production stock deduction, purchasing, stock adjustments, ledger, and stock reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
