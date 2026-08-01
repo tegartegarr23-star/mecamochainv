@@ -104,23 +104,15 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setIsOpenSidebar, onO
           </div>
         )}
 
-        {/* Switch User Selector */}
-        <div className="relative flex items-center gap-1.5 bg-slate-100 px-2 py-1.5 rounded-md border border-slate-200">
-          <UserCheck className="w-3.5 h-3.5 text-slate-500" />
-          <select
-            value={currentUser.id}
-            onChange={(e) => {
-              const selected = users.find((u) => u.id === e.target.value);
-              if (selected) setCurrentUser(selected);
-            }}
-            className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-none cursor-pointer pr-1"
-          >
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name} ({u.role === 'super_admin' ? 'Super Admin' : 'Staff'})
-              </option>
-            ))}
-          </select>
+        {/* Logged-in User Profile Badge */}
+        <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-md border border-slate-200">
+          <UserCheck className="w-3.5 h-3.5 text-amber-600" />
+          <span className="text-xs font-bold text-slate-800">{currentUser.name}</span>
+          <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+            currentUser.role === 'super_admin' ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-blue-100 text-blue-800 border border-blue-200'
+          }`}>
+            {currentUser.role === 'super_admin' ? 'Super Admin' : 'Staff'}
+          </span>
         </div>
 
         {/* Logout Button */}

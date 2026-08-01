@@ -99,7 +99,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpe
 
       {/* Sidebar Drawer */}
       <aside
-        className={`fixed top-0 left-0 z-50 h-full w-60 bg-slate-900 text-slate-400 flex flex-col shrink-0 transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:z-auto ${
+        className={`fixed top-0 left-0 z-50 h-screen w-60 bg-slate-900 text-slate-400 flex flex-col shrink-0 transition-transform duration-300 ease-in-out lg:translate-x-0 lg:sticky lg:top-0 lg:z-30 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -192,18 +192,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpe
           </div>
 
           <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
-            <button
-              onClick={() => {
-                if (window.confirm('Reset semua data ke data sampel awal Mecamocha?')) {
-                  resetToDefaultData();
-                }
-              }}
-              className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400 hover:text-amber-400 transition-colors"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset Data Demo</span>
-            </button>
-            <span className="text-[9px] font-mono text-slate-600">v1.0</span>
+            <div className="flex items-center gap-1.5 text-[10px] font-mono text-emerald-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Supabase Sync Active</span>
+            </div>
+            <span className="text-[9px] font-mono text-slate-500">v1.0</span>
           </div>
         </div>
       </aside>
