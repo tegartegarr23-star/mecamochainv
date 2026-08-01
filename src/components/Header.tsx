@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu as MenuIcon, AlertTriangle, UserCheck, Plus, ShoppingBag, ChefHat, ArrowUpRight, ShieldCheck } from 'lucide-react';
+import { Menu as MenuIcon, AlertTriangle, UserCheck, Plus, ShoppingBag, ChefHat, ArrowUpRight, ShieldCheck, LogOut } from 'lucide-react';
 import { useInventory } from '../context/InventoryContext';
 import { NavTab } from './Sidebar';
 
@@ -7,9 +7,10 @@ interface HeaderProps {
   activeTab: NavTab;
   setIsOpenSidebar: (open: boolean) => void;
   onOpenQuickAction?: (action: 'purchase' | 'prepare' | 'production' | 'adjustment') => void;
+  onLogout?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ activeTab, setIsOpenSidebar, onOpenQuickAction }) => {
+export const Header: React.FC<HeaderProps> = ({ activeTab, setIsOpenSidebar, onOpenQuickAction, onLogout }) => {
   const { users, currentUser, setCurrentUser, ingredients } = useInventory();
 
   // Calculate critical stock count
@@ -43,10 +44,6 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setIsOpenSidebar, onO
     users: {
       title: 'Manajemen User & Hak Akses',
       subtitle: 'Kelola pengguna sistem dan hak akses khusus Super Admin',
-    },
-    supabase: {
-      title: 'Integrasi Supabase & Database',
-      subtitle: 'Skema tabel SQL Supabase & fungsi trigger otomatis',
     },
   };
 
@@ -125,6 +122,18 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setIsOpenSidebar, onO
             ))}
           </select>
         </div>
+
+        {/* Logout Button */}
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-red-50 hover:text-red-600 text-slate-700 border border-slate-200 hover:border-red-200 rounded-md text-xs font-semibold transition-colors"
+            title="Keluar dari sistem"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Keluar</span>
+          </button>
+        )}
       </div>
     </header>
   );

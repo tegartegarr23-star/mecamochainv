@@ -15,6 +15,7 @@ import {
   ChefHat,
   SlidersHorizontal,
   RotateCcw,
+  LogOut,
 } from 'lucide-react';
 import { useInventory } from '../context/InventoryContext';
 
@@ -25,17 +26,17 @@ export type NavTab =
   | 'recipes'
   | 'transactions'
   | 'reports'
-  | 'users'
-  | 'supabase';
+  | 'users';
 
 interface SidebarProps {
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
+  onLogout?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpen, setIsOpen }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpen, setIsOpen, onLogout }) => {
   const { currentUser, isSuperAdmin, resetToDefaultData } = useInventory();
 
   const navItems = [
@@ -79,12 +80,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpe
           },
         ]
       : []),
-    {
-      id: 'supabase' as NavTab,
-      label: 'Database / Supabase',
-      icon: Database,
-      badge: null,
-    },
   ];
 
   const handleNavClick = (tab: NavTab) => {
@@ -173,16 +168,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpe
 
         {/* User Card & Footer */}
         <div className="p-4 border-t border-slate-800 space-y-3">
-          <div className="flex items-center gap-3 px-1">
-            <div className="w-8 h-8 rounded-full bg-slate-700 text-slate-100 font-bold flex items-center justify-center text-xs shrink-0 border border-slate-600">
-              {currentUser.name.charAt(0)}
+          <div className="flex items-center justify-between gap-2 px-1">
+            <div className="flex items-center gap-2.5 overflow-hidden flex-1 min-w-0">
+              <div className="w-8 h-8 rounded-full bg-slate-700 text-slate-100 font-bold flex items-center justify-center text-xs shrink-0 border border-slate-600">
+                {currentUser.name.charAt(0)}
+              </div>
+              <div className="overflow-hidden flex-1 min-w-0">
+                <p className="text-xs font-medium text-white truncate">{currentUser.name}</p>
+                <p className="text-[10px] text-slate-500 truncate">
+                  {isSuperAdmin ? 'Super Admin' : 'Staff Kitchen'}
+                </p>
+              </div>
             </div>
-            <div className="overflow-hidden flex-1 min-w-0">
-              <p className="text-xs font-medium text-white truncate">{currentUser.name}</p>
-              <p className="text-[10px] text-slate-500 truncate">
-                {isSuperAdmin ? 'Super Admin' : 'Staff Kitchen'} &bull; {currentUser.email}
-              </p>
-            </div>
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                title="Keluar / Logout"
+                className="p-1.5 rounded-md text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
