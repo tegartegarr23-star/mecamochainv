@@ -1,20 +1,16 @@
 import React, { useState } from 'react';
 import {
-  UtensilsCrossed,
   Plus,
   Edit2,
   Trash2,
   FileText,
   X,
   History,
-  CheckCircle2,
   Layers,
-  Sparkles,
-  Calculator,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
-import { Menu, Ingredient, Unit } from '../../types';
-import { formatCurrency, formatNumber } from '../../utils/formatters';
+import { Menu } from '../../types';
+import { formatNumber } from '../../utils/formatters';
 
 export const MenusManager: React.FC = () => {
   const {
@@ -36,7 +32,6 @@ export const MenusManager: React.FC = () => {
   const [editingMenu, setEditingMenu] = useState<Menu | null>(null);
   const [menuName, setMenuName] = useState('');
   const [menuCategory, setMenuCategory] = useState('');
-  const [menuPrice, setMenuPrice] = useState('0');
 
   // Recipe BOM Editor Modal State
   const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false);
@@ -50,12 +45,10 @@ export const MenusManager: React.FC = () => {
       setEditingMenu(menu);
       setMenuName(menu.name);
       setMenuCategory(menu.category);
-      setMenuPrice(String(menu.price));
     } else {
       setEditingMenu(null);
       setMenuName('');
       setMenuCategory('Snack');
-      setMenuPrice('25000');
     }
     setIsMenuModalOpen(true);
   };
@@ -68,13 +61,13 @@ export const MenusManager: React.FC = () => {
       updateMenu(editingMenu.id, {
         name: menuName,
         category: menuCategory,
-        price: Number(menuPrice),
+        price: editingMenu.price || 0,
       });
     } else {
       addMenu({
         name: menuName,
         category: menuCategory,
-        price: Number(menuPrice),
+        price: 0,
         is_active: true,
       });
     }
@@ -158,12 +151,6 @@ export const MenusManager: React.FC = () => {
           const { recipe, details } = getMenuRecipeDetails(menu.id);
           const menuVersions = recipes.filter((r) => r.menu_id === menu.id);
 
-          // Calculate estimated Cost of Goods Sold (HPP)
-          const estimatedCost = details.reduce((sum, item) => {
-            const ing = ingredients.find((i) => i.id === item.ingredient_id);
-            return sum + (item.quantity || 0) * (ing?.cost_per_unit || 0);
-          }, 0);
-
           return (
             <div
               key={menu.id}
@@ -192,21 +179,6 @@ export const MenusManager: React.FC = () => {
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
-                  </div>
-                </div>
-
-                <div className="mt-3 pt-3 border-t border-stone-100 flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] text-stone-400 font-medium">Harga Jual</p>
-                    <p className="text-base font-extrabold text-stone-900 font-serif">
-                      {formatCurrency(menu.price)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] text-stone-400 font-medium">Estimasi HPP (BOM)</p>
-                    <p className="text-xs font-bold text-amber-800 font-mono">
-                      {formatCurrency(estimatedCost)} / porsi
-                    </p>
                   </div>
                 </div>
 
@@ -298,17 +270,6 @@ export const MenusManager: React.FC = () => {
                   value={menuCategory}
                   onChange={(e) => setMenuCategory(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Harga Jual (Rp)</label>
-                <input
-                  type="number"
-                  required
-                  value={menuPrice}
-                  onChange={(e) => setMenuPrice(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                 />
               </div>
 

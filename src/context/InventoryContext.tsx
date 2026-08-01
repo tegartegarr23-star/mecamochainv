@@ -734,6 +734,35 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       )
       .join(',\n');
 
+    const menuInserts = menus
+      .map(
+        (m) =>
+          `  ('${m.id.replace(/'/g, "''")}', '${m.name.replace(/'/g, "''")}', '${m.category.replace(
+            /'/g,
+            "''"
+          )}', ${m.price || 0}, ${m.is_active ? 'TRUE' : 'FALSE'})`
+      )
+      .join(',\n');
+
+    const recipeInserts = recipes
+      .map(
+        (r) =>
+          `  ('${r.id.replace(/'/g, "''")}', '${r.menu_id.replace(/'/g, "''")}', ${r.version || 1}, ${
+            r.is_active ? 'TRUE' : 'FALSE'
+          }, ${r.notes ? `'${r.notes.replace(/'/g, "''")}'` : 'NULL'})`
+      )
+      .join(',\n');
+
+    const recipeDetailInserts = recipeDetails
+      .map(
+        (rd) =>
+          `  ('${rd.id.replace(/'/g, "''")}', '${rd.recipe_id.replace(
+            /'/g,
+            "''"
+          )}', '${rd.ingredient_id.replace(/'/g, "''")}', ${rd.quantity || 0})`
+      )
+      .join(',\n');
+
     return `-- MECAMOCHA INVENTORY SYSTEM - SUPABASE DATABASE MIGRATION SCRIPT
 -- Execute this script in your Supabase SQL Editor
 
@@ -854,9 +883,9 @@ AFTER INSERT ON public.stock_movements
 FOR EACH ROW
 EXECUTE FUNCTION update_ingredient_current_stock();
 
--- ===================================================
--- SEED DATA INSERTS (UNITS, CATEGORIES, INGREDIENTS)
--- ===================================================
+-- =========================================================================
+-- SEED DATA INSERTS (UNITS, CATEGORIES, INGREDIENTS, MENUS, RECIPES, DETAILS)
+-- =========================================================================
 INSERT INTO public.units (id, name, abbreviation) VALUES
 ${unitInserts}
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, abbreviation = EXCLUDED.abbreviation;
@@ -867,14 +896,19 @@ ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 
 INSERT INTO public.ingredients (id, code, name, category_id, unit_id, type, min_stock, current_stock, is_active, cost_per_unit) VALUES
 ${ingredientInserts}
-ON CONFLICT (code) DO UPDATE SET
+ON CONFLICT (id) DO UPDATE SET
+  code = EXCLUDED.code,
   name = EXCLUDED.name,
   category_id = EXCLUDED.category_id,
   unit_id = EXCLUDED.unit_id,
   type = EXCLUDED.type,
   min_stock = EXCLUDED.min_stock,
-  is_active = EXCLUDED.is_active;
-`;
+  is_active = EXCLUDED.is_active,
+  cost_per_unit = EXCLUDED.cost_per_unit;
+
+${menuInserts ? `INSERT INTO public.menus (id, name, category, price, is_active) VALUES\n${menuInserts}\nON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, category = EXCLUDED.category, price = EXCLUDED.price, is_active = EXCLUDED.is_active;\n` : ''}
+${recipeInserts ? `INSERT INTO public.recipes (id, menu_id, version, is_active, notes) VALUES\n${recipeInserts}\nON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, is_active = EXCLUDED.is_active, notes = EXCLUDED.notes;\n` : ''}
+${recipeDetailInserts ? `INSERT INTO public.recipe_details (id, recipe_id, ingredient_id, quantity) VALUES\n${recipeDetailInserts}\nON CONFLICT (id) DO UPDATE SET quantity = EXCLUDED.quantity;\n` : ''}`;
   };
 
   return (

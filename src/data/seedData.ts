@@ -187,81 +187,247 @@ export const INITIAL_INGREDIENTS: Ingredient[] = [
   { id: 'ing-pp017', code: 'PP017', name: 'PP KAILAN', category_id: 'c-5', unit_id: 'u-1', type: 'prepared', min_stock: 500, current_stock: 1500, is_active: true, cost_per_unit: 35 },
   { id: 'ing-pp018', code: 'PP018', name: 'PP BRULLEE BOMB', category_id: 'c-5', unit_id: 'u-3', type: 'prepared', min_stock: 20, current_stock: 100, is_active: true, cost_per_unit: 3500 },
   { id: 'ing-pp019', code: 'PP019', name: 'PP TEPUNG MIX', category_id: 'c-5', unit_id: 'u-1', type: 'prepared', min_stock: 1000, current_stock: 4000, is_active: true, cost_per_unit: 25 },
-  { id: 'ing-pp020', code: 'PP020', name: 'PP COOKIES', category_id: 'c-5', unit_id: 'u-3', type: 'prepared', min_stock: 30, current_stock: 120, is_active: true, cost_per_unit: 4000 },
+  { id: 'ing-pp020', code: 'PP020', name: 'PP Lotus Biscoff Cookies', category_id: 'c-5', unit_id: 'u-3', type: 'prepared', min_stock: 30, current_stock: 120, is_active: true, cost_per_unit: 4000 },
+  { id: 'ing-pp021', code: 'PP021', name: 'PP Double Choco Cookies', category_id: 'c-5', unit_id: 'u-3', type: 'prepared', min_stock: 30, current_stock: 120, is_active: true, cost_per_unit: 4000 },
+  { id: 'ing-pp022', code: 'PP022', name: 'PP MATCHA', category_id: 'c-5', unit_id: 'u-1', type: 'prepared', min_stock: 200, current_stock: 800, is_active: true, cost_per_unit: 50 },
 ];
 
 export const INITIAL_MENUS: Menu[] = [
-  {
-    id: 'm-1',
-    name: 'Pisang Goreng Saus Caramel',
-    category: 'Snack Sweet',
-    price: 28000,
-    is_active: true,
-    active_recipe_version: 1,
-  },
-  {
-    id: 'm-2',
-    name: 'Brulee Bomb Deluxe',
-    category: 'Snack Savory',
-    price: 35000,
-    is_active: true,
-    active_recipe_version: 1,
-  },
-  {
-    id: 'm-3',
-    name: 'Chicken Crispy Caramel Bowl',
-    category: 'Main Course',
-    price: 42000,
-    is_active: true,
-    active_recipe_version: 1,
-  },
+  { id: 'mn-01', name: 'Pisang Goreng Saus Caramel', category: 'Dessert', price: 28000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-02', name: 'BRULEE BOMB', category: 'Snack', price: 32000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-03', name: 'Snack Platter', category: 'Snack', price: 38000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-04', name: 'Cireng Saus Bangkok', category: 'Snack', price: 22000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-05', name: 'French Fries', category: 'Snack', price: 25000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-06', name: 'Pisang Bakar Cokelat Keju', category: 'Dessert', price: 28000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-07', name: 'Chicken Pop', category: 'Snack', price: 30000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-08', name: 'French Toast Vanilla w/ Ice Cream', category: 'Dessert', price: 32000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-09', name: 'French Toast Matcha w/ Ice Cream', category: 'Dessert', price: 34000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-10', name: 'French Toast Aren Butter Chocolate', category: 'Dessert', price: 34000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-11', name: 'Lotus Biscoff Cookies', category: 'Dessert', price: 25000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-12', name: 'Banana Choco Aren Toast', category: 'Dessert', price: 30000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-13', name: 'Katsu Toast', category: 'Main Course', price: 36000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-14', name: 'Beef Blackpepper', category: 'Main Course', price: 42000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-15', name: 'Nashville Chicken Nasi Daun Jeruk', category: 'Main Course', price: 38000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-16', name: 'Beef Maranggi', category: 'Main Course', price: 45000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-17', name: 'Ayam Goreng Bawang Putih Nasi Daun Jeruk', category: 'Main Course', price: 38000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-18', name: 'Nasi Goreng Mecamocha', category: 'Main Course', price: 35000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-19', name: 'Nasi Telur Crispy', category: 'Main Course', price: 25000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-20', name: 'Ayam Sambal Matah', category: 'Main Course', price: 38000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-21', name: 'Double Choco Cookies', category: 'Dessert', price: 25000, is_active: true, active_recipe_version: 1 },
 ];
 
 export const INITIAL_RECIPES: Recipe[] = [
-  {
-    id: 'rec-1',
-    menu_id: 'm-1',
-    version: 1,
-    is_active: true,
-    notes: 'Resep standar Pisang Goreng Caramel 4 pcs per porsi',
-    created_at: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 'rec-2',
-    menu_id: 'm-2',
-    version: 1,
-    is_active: true,
-    notes: 'Resep standar Brulee Bomb 5 pcs per porsi',
-    created_at: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 'rec-3',
-    menu_id: 'm-3',
-    version: 1,
-    is_active: true,
-    notes: 'Chicken Crispy Bowl porsi 150g ayam marinasi',
-    created_at: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
-  },
+  { id: 'rec-mn01', menu_id: 'mn-01', version: 1, is_active: true, notes: 'Resep MN001 Pisang Goreng Saus Caramel' },
+  { id: 'rec-mn02', menu_id: 'mn-02', version: 1, is_active: true, notes: 'Resep MN002 BRULEE BOMB' },
+  { id: 'rec-mn03', menu_id: 'mn-03', version: 1, is_active: true, notes: 'Resep MN003 Snack Platter' },
+  { id: 'rec-mn04', menu_id: 'mn-04', version: 1, is_active: true, notes: 'Resep MN004 Cireng Saus Bangkok' },
+  { id: 'rec-mn05', menu_id: 'mn-05', version: 1, is_active: true, notes: 'Resep MN005 French Fries' },
+  { id: 'rec-mn06', menu_id: 'mn-06', version: 1, is_active: true, notes: 'Resep MN006 Pisang Bakar Cokelat Keju' },
+  { id: 'rec-mn07', menu_id: 'mn-07', version: 1, is_active: true, notes: 'Resep MN007 Chicken Pop' },
+  { id: 'rec-mn08', menu_id: 'mn-08', version: 1, is_active: true, notes: 'Resep MN008 French Toast Vanilla w/ Ice Cream' },
+  { id: 'rec-mn09', menu_id: 'mn-09', version: 1, is_active: true, notes: 'Resep MN009 French Toast Matcha w/ Ice Cream' },
+  { id: 'rec-mn10', menu_id: 'mn-10', version: 1, is_active: true, notes: 'Resep MN010 French Toast Aren Butter Chocolate' },
+  { id: 'rec-mn11', menu_id: 'mn-11', version: 1, is_active: true, notes: 'Resep MN011 Lotus Biscoff Cookies' },
+  { id: 'rec-mn12', menu_id: 'mn-12', version: 1, is_active: true, notes: 'Resep MN012 Banana Choco Aren Toast' },
+  { id: 'rec-mn13', menu_id: 'mn-13', version: 1, is_active: true, notes: 'Resep MN013 Katsu Toast' },
+  { id: 'rec-mn14', menu_id: 'mn-14', version: 1, is_active: true, notes: 'Resep MN014 Beef Blackpepper' },
+  { id: 'rec-mn15', menu_id: 'mn-15', version: 1, is_active: true, notes: 'Resep MN015 Nashville Chicken Nasi Daun Jeruk' },
+  { id: 'rec-mn16', menu_id: 'mn-16', version: 1, is_active: true, notes: 'Resep MN016 Beef Maranggi' },
+  { id: 'rec-mn17', menu_id: 'mn-17', version: 1, is_active: true, notes: 'Resep MN017 Ayam Goreng Bawang Putih Nasi Daun Jeruk' },
+  { id: 'rec-mn18', menu_id: 'mn-18', version: 1, is_active: true, notes: 'Resep MN018 Nasi Goreng Mecamocha' },
+  { id: 'rec-mn19', menu_id: 'mn-19', version: 1, is_active: true, notes: 'Resep MN019 Nasi Telur Crispy' },
+  { id: 'rec-mn20', menu_id: 'mn-20', version: 1, is_active: true, notes: 'Resep MN020 Ayam Sambal Matah' },
+  { id: 'rec-mn21', menu_id: 'mn-21', version: 1, is_active: true, notes: 'Resep MN021 Double Choco Cookies' },
 ];
 
 export const INITIAL_RECIPE_DETAILS: RecipeDetail[] = [
-  // Menu 1: Pisang Goreng Saus Caramel
-  { id: 'rd-1', recipe_id: 'rec-1', ingredient_id: 'ing-3', quantity: 4 }, // 4 pcs Pisang Kepok
-  { id: 'rd-2', recipe_id: 'rec-1', ingredient_id: 'ing-pp-2', quantity: 80 }, // 80g Adonan Pisang
-  { id: 'rd-3', recipe_id: 'rec-1', ingredient_id: 'ing-6', quantity: 30 }, // 30ml Saus Caramel Base
-  { id: 'rd-4', recipe_id: 'rec-1', ingredient_id: 'ing-4', quantity: 50 }, // 50ml Minyak Goreng
+  // MN001: Pisang Goreng Saus Caramel
+  { id: 'rd-m1-1', recipe_id: 'rec-mn01', ingredient_id: 'ing-mm062', quantity: 3 },
+  { id: 'rd-m1-2', recipe_id: 'rec-mn01', ingredient_id: 'ing-mm035', quantity: 5 },
+  { id: 'rd-m1-3', recipe_id: 'rec-mn01', ingredient_id: 'ing-pp004', quantity: 50 },
+  { id: 'rd-m1-4', recipe_id: 'rec-mn01', ingredient_id: 'ing-mm034', quantity: 1 },
+  { id: 'rd-m1-5', recipe_id: 'rec-mn01', ingredient_id: 'ing-pp015', quantity: 100 },
 
-  // Menu 2: Brulee Bomb
-  { id: 'rd-5', recipe_id: 'rec-2', ingredient_id: 'ing-pp-3', quantity: 150 }, // 150ml Brulee Cream
-  { id: 'rd-6', recipe_id: 'rec-2', ingredient_id: 'ing-5', quantity: 40 }, // 40g Keju Mozzarella
-  { id: 'rd-7', recipe_id: 'rec-2', ingredient_id: 'ing-2', quantity: 30 }, // 30g Tepung Crispy
-  { id: 'rd-8', recipe_id: 'rec-2', ingredient_id: 'ing-4', quantity: 60 }, // 60ml Minyak
+  // MN002: BRULEE BOMB
+  { id: 'rd-m2-1', recipe_id: 'rec-mn02', ingredient_id: 'ing-mm034', quantity: 1 },
+  { id: 'rd-m2-2', recipe_id: 'rec-mn02', ingredient_id: 'ing-pp018', quantity: 5 },
 
-  // Menu 3: Chicken Crispy Caramel Bowl
-  { id: 'rd-9', recipe_id: 'rec-3', ingredient_id: 'ing-pp-1', quantity: 150 }, // 150g Ayam Marinasi
-  { id: 'rd-10', recipe_id: 'rec-3', ingredient_id: 'ing-2', quantity: 50 }, // 50g Tepung Crispy
-  { id: 'rd-11', recipe_id: 'rec-3', ingredient_id: 'ing-6', quantity: 25 }, // 25ml Saus Caramel
-  { id: 'rd-12', recipe_id: 'rec-3', ingredient_id: 'ing-4', quantity: 80 }, // 80ml Minyak
+  // MN003: Snack Platter
+  { id: 'rd-m3-1', recipe_id: 'rec-mn03', ingredient_id: 'ing-mm026', quantity: 55 },
+  { id: 'rd-m3-2', recipe_id: 'rec-mn03', ingredient_id: 'ing-mm058', quantity: 3 },
+  { id: 'rd-m3-3', recipe_id: 'rec-mn03', ingredient_id: 'ing-mm076', quantity: 2 },
+  { id: 'rd-m3-4', recipe_id: 'rec-mn03', ingredient_id: 'ing-mm034', quantity: 1 },
+  { id: 'rd-m3-5', recipe_id: 'rec-mn03', ingredient_id: 'ing-mm066', quantity: 2 },
+  { id: 'rd-m3-6', recipe_id: 'rec-mn03', ingredient_id: 'ing-mm068', quantity: 5 },
+  { id: 'rd-m3-7', recipe_id: 'rec-mn03', ingredient_id: 'ing-mm052', quantity: 5 },
+
+  // MN004: Cireng Saus Bangkok
+  { id: 'rd-m4-1', recipe_id: 'rec-mn04', ingredient_id: 'ing-mm019', quantity: 6 },
+  { id: 'rd-m4-2', recipe_id: 'rec-mn04', ingredient_id: 'ing-mm034', quantity: 1 },
+  { id: 'rd-m4-3', recipe_id: 'rec-mn04', ingredient_id: 'ing-mm025', quantity: 10 },
+
+  // MN005: French Fries
+  { id: 'rd-m5-1', recipe_id: 'rec-mn05', ingredient_id: 'ing-mm026', quantity: 120 },
+  { id: 'rd-m5-2', recipe_id: 'rec-mn05', ingredient_id: 'ing-mm068', quantity: 5 },
+  { id: 'rd-m5-3', recipe_id: 'rec-mn05', ingredient_id: 'ing-mm034', quantity: 1 },
+  { id: 'rd-m5-4', recipe_id: 'rec-mn05', ingredient_id: 'ing-mm052', quantity: 5 },
+
+  // MN006: Pisang Bakar Cokelat Keju
+  { id: 'rd-m6-1', recipe_id: 'rec-mn06', ingredient_id: 'ing-mm062', quantity: 3 },
+  { id: 'rd-m6-2', recipe_id: 'rec-mn06', ingredient_id: 'ing-mm050', quantity: 10 },
+  { id: 'rd-m6-3', recipe_id: 'rec-mn06', ingredient_id: 'ing-mm034', quantity: 1 },
+  { id: 'rd-m6-4', recipe_id: 'rec-mn06', ingredient_id: 'ing-mm042', quantity: 10 },
+  { id: 'rd-m6-5', recipe_id: 'rec-mn06', ingredient_id: 'ing-mm032', quantity: 20 },
+
+  // MN007: Chicken Pop
+  { id: 'rd-m7-1', recipe_id: 'rec-mn07', ingredient_id: 'ing-mm022', quantity: 100 },
+  { id: 'rd-m7-2', recipe_id: 'rec-mn07', ingredient_id: 'ing-mm068', quantity: 5 },
+  { id: 'rd-m7-3', recipe_id: 'rec-mn07', ingredient_id: 'ing-pp003', quantity: 30 },
+  { id: 'rd-m7-4', recipe_id: 'rec-mn07', ingredient_id: 'ing-pp019', quantity: 70 },
+  { id: 'rd-m7-5', recipe_id: 'rec-mn07', ingredient_id: 'ing-pp012', quantity: 10 },
+  { id: 'rd-m7-6', recipe_id: 'rec-mn07', ingredient_id: 'ing-mm034', quantity: 1 },
+  { id: 'rd-m7-7', recipe_id: 'rec-mn07', ingredient_id: 'ing-mm052', quantity: 5 },
+
+  // MN008: French Toast Vanilla w/ Ice Cream
+  { id: 'rd-m8-1', recipe_id: 'rec-mn08', ingredient_id: 'ing-mm088', quantity: 1 },
+  { id: 'rd-m8-2', recipe_id: 'rec-mn08', ingredient_id: 'ing-mm050', quantity: 15 },
+  { id: 'rd-m8-3', recipe_id: 'rec-mn08', ingredient_id: 'ing-pp016', quantity: 70 },
+  { id: 'rd-m8-4', recipe_id: 'rec-mn08', ingredient_id: 'ing-pp006', quantity: 50 },
+  { id: 'rd-m8-5', recipe_id: 'rec-mn08', ingredient_id: 'ing-mm077', quantity: 1 },
+  { id: 'rd-m8-6', recipe_id: 'rec-mn08', ingredient_id: 'ing-mm040', quantity: 25 },
+
+  // MN009: French Toast Matcha w/ Ice Cream
+  { id: 'rd-m9-1', recipe_id: 'rec-mn09', ingredient_id: 'ing-mm050', quantity: 15 },
+  { id: 'rd-m9-2', recipe_id: 'rec-mn09', ingredient_id: 'ing-mm088', quantity: 1 },
+  { id: 'rd-m9-3', recipe_id: 'rec-mn09', ingredient_id: 'ing-pp016', quantity: 100 },
+  { id: 'rd-m9-4', recipe_id: 'rec-mn09', ingredient_id: 'ing-mm040', quantity: 25 },
+  { id: 'rd-m9-5', recipe_id: 'rec-mn09', ingredient_id: 'ing-pp022', quantity: 10 },
+  { id: 'rd-m9-6', recipe_id: 'rec-mn09', ingredient_id: 'ing-mm077', quantity: 1 },
+
+  // MN010: French Toast Aren Butter Chocolate
+  { id: 'rd-m10-1', recipe_id: 'rec-mn10', ingredient_id: 'ing-mm088', quantity: 1 },
+  { id: 'rd-m10-2', recipe_id: 'rec-mn10', ingredient_id: 'ing-mm050', quantity: 15 },
+  { id: 'rd-m10-3', recipe_id: 'rec-mn10', ingredient_id: 'ing-pp005', quantity: 50 },
+  { id: 'rd-m10-4', recipe_id: 'rec-mn10', ingredient_id: 'ing-mm040', quantity: 25 },
+  { id: 'rd-m10-5', recipe_id: 'rec-mn10', ingredient_id: 'ing-pp016', quantity: 100 },
+  { id: 'rd-m10-6', recipe_id: 'rec-mn10', ingredient_id: 'ing-mm035', quantity: 5 },
+
+  // MN011: Lotus Biscoff Cookies
+  { id: 'rd-m11-1', recipe_id: 'rec-mn11', ingredient_id: 'ing-mm034', quantity: 1 },
+  { id: 'rd-m11-2', recipe_id: 'rec-mn11', ingredient_id: 'ing-pp020', quantity: 1 },
+
+  // MN012: Banana Choco Aren Toast
+  { id: 'rd-m12-1', recipe_id: 'rec-mn12', ingredient_id: 'ing-mm062', quantity: 1 },
+  { id: 'rd-m12-2', recipe_id: 'rec-mn12', ingredient_id: 'ing-mm050', quantity: 15 },
+  { id: 'rd-m12-3', recipe_id: 'rec-mn12', ingredient_id: 'ing-mm035', quantity: 10 },
+  { id: 'rd-m12-4', recipe_id: 'rec-mn12', ingredient_id: 'ing-mm032', quantity: 15 },
+  { id: 'rd-m12-5', recipe_id: 'rec-mn12', ingredient_id: 'ing-mm090', quantity: 1 },
+  { id: 'rd-m12-6', recipe_id: 'rec-mn12', ingredient_id: 'ing-mm088', quantity: 1 },
+  { id: 'rd-m12-7', recipe_id: 'rec-mn12', ingredient_id: 'ing-pp016', quantity: 70 },
+
+  // MN013: Katsu Toast
+  { id: 'rd-m13-1', recipe_id: 'rec-mn13', ingredient_id: 'ing-mm022', quantity: 150 },
+  { id: 'rd-m13-2', recipe_id: 'rec-mn13', ingredient_id: 'ing-mm083', quantity: 10 },
+  { id: 'rd-m13-3', recipe_id: 'rec-mn13', ingredient_id: 'ing-mm090', quantity: 1 },
+  { id: 'rd-m13-4', recipe_id: 'rec-mn13', ingredient_id: 'ing-pp003', quantity: 10 },
+  { id: 'rd-m13-5', recipe_id: 'rec-mn13', ingredient_id: 'ing-mm065', quantity: 2 },
+  { id: 'rd-m13-6', recipe_id: 'rec-mn13', ingredient_id: 'ing-mm050', quantity: 10 },
+  { id: 'rd-m13-7', recipe_id: 'rec-mn13', ingredient_id: 'ing-mm068', quantity: 8 },
+  { id: 'rd-m13-8', recipe_id: 'rec-mn13', ingredient_id: 'ing-mm052', quantity: 8 },
+  { id: 'rd-m13-9', recipe_id: 'rec-mn13', ingredient_id: 'ing-mm033', quantity: 20 },
+  { id: 'rd-m13-10', recipe_id: 'rec-mn13', ingredient_id: 'ing-mm029', quantity: 2 },
+  { id: 'rd-m13-11', recipe_id: 'rec-mn13', ingredient_id: 'ing-pp012', quantity: 40 },
+  { id: 'rd-m13-12', recipe_id: 'rec-mn13', ingredient_id: 'ing-pp014', quantity: 9 },
+
+  // MN014: Beef Blackpepper
+  { id: 'rd-m14-1', recipe_id: 'rec-mn14', ingredient_id: 'ing-mm045', quantity: 10 },
+  { id: 'rd-m14-2', recipe_id: 'rec-mn14', ingredient_id: 'ing-mm012', quantity: 10 },
+  { id: 'rd-m14-3', recipe_id: 'rec-mn14', ingredient_id: 'ing-mm010', quantity: 10 },
+  { id: 'rd-m14-4', recipe_id: 'rec-mn14', ingredient_id: 'ing-mm009', quantity: 2 },
+  { id: 'rd-m14-5', recipe_id: 'rec-mn14', ingredient_id: 'ing-mm080', quantity: 1 },
+  { id: 'rd-m14-6', recipe_id: 'rec-mn14', ingredient_id: 'ing-mm090', quantity: 1 },
+  { id: 'rd-m14-7', recipe_id: 'rec-mn14', ingredient_id: 'ing-mm005', quantity: 2 },
+  { id: 'rd-m14-8', recipe_id: 'rec-mn14', ingredient_id: 'ing-mm074', quantity: 45 },
+  { id: 'rd-m14-9', recipe_id: 'rec-mn14', ingredient_id: 'ing-mm008', quantity: 200 },
+
+  // MN015: Nashville Chicken Nasi Daun Jeruk
+  { id: 'rd-m15-1', recipe_id: 'rec-mn15', ingredient_id: 'ing-mm008', quantity: 200 },
+  { id: 'rd-m15-2', recipe_id: 'rec-mn15', ingredient_id: 'ing-pp011', quantity: 2 },
+  { id: 'rd-m15-3', recipe_id: 'rec-mn15', ingredient_id: 'ing-mm090', quantity: 1 },
+  { id: 'rd-m15-4', recipe_id: 'rec-mn15', ingredient_id: 'ing-mm029', quantity: 2 },
+  { id: 'rd-m15-5', recipe_id: 'rec-mn15', ingredient_id: 'ing-pp017', quantity: 25 },
+  { id: 'rd-m15-6', recipe_id: 'rec-mn15', ingredient_id: 'ing-mm059', quantity: 150 },
+  { id: 'rd-m15-7', recipe_id: 'rec-mn15', ingredient_id: 'ing-mm060', quantity: 1 },
+  { id: 'rd-m15-8', recipe_id: 'rec-mn15', ingredient_id: 'ing-mm066', quantity: 2 },
+  { id: 'rd-m15-9', recipe_id: 'rec-mn15', ingredient_id: 'ing-pp003', quantity: 20 },
+  { id: 'rd-m15-10', recipe_id: 'rec-mn15', ingredient_id: 'ing-mm080', quantity: 1 },
+  { id: 'rd-m15-11', recipe_id: 'rec-mn15', ingredient_id: 'ing-pp012', quantity: 40 },
+  { id: 'rd-m15-12', recipe_id: 'rec-mn15', ingredient_id: 'ing-pp019', quantity: 50 },
+
+  // MN016: Beef Maranggi
+  { id: 'rd-m16-1', recipe_id: 'rec-mn16', ingredient_id: 'ing-mm074', quantity: 45 },
+  { id: 'rd-m16-2', recipe_id: 'rec-mn16', ingredient_id: 'ing-mm008', quantity: 200 },
+  { id: 'rd-m16-3', recipe_id: 'rec-mn16', ingredient_id: 'ing-mm029', quantity: 1 },
+  { id: 'rd-m16-4', recipe_id: 'rec-mn16', ingredient_id: 'ing-mm053', quantity: 1 },
+  { id: 'rd-m16-5', recipe_id: 'rec-mn16', ingredient_id: 'ing-mm066', quantity: 1 },
+  { id: 'rd-m16-6', recipe_id: 'rec-mn16', ingredient_id: 'ing-mm046', quantity: 1 },
+  { id: 'rd-m16-7', recipe_id: 'rec-mn16', ingredient_id: 'ing-pp008', quantity: 50 },
+  { id: 'rd-m16-8', recipe_id: 'rec-mn16', ingredient_id: 'ing-mm090', quantity: 1 },
+  { id: 'rd-m16-9', recipe_id: 'rec-mn16', ingredient_id: 'ing-mm041', quantity: 3 },
+  { id: 'rd-m16-10', recipe_id: 'rec-mn16', ingredient_id: 'ing-pp009', quantity: 20 },
+
+  // MN017: Ayam Goreng Bawang Putih Nasi Daun Jeruk
+  { id: 'rd-m17-1', recipe_id: 'rec-mn17', ingredient_id: 'ing-mm059', quantity: 150 },
+  { id: 'rd-m17-2', recipe_id: 'rec-mn17', ingredient_id: 'ing-mm008', quantity: 200 },
+  { id: 'rd-m17-3', recipe_id: 'rec-mn17', ingredient_id: 'ing-pp002', quantity: 38 },
+  { id: 'rd-m17-4', recipe_id: 'rec-mn17', ingredient_id: 'ing-mm090', quantity: 1 },
+  { id: 'rd-m17-5', recipe_id: 'rec-mn17', ingredient_id: 'ing-pp003', quantity: 10 },
+  { id: 'rd-m17-6', recipe_id: 'rec-mn17', ingredient_id: 'ing-pp019', quantity: 50 },
+  { id: 'rd-m17-7', recipe_id: 'rec-mn17', ingredient_id: 'ing-mm066', quantity: 2 },
+  { id: 'rd-m17-8', recipe_id: 'rec-mn17', ingredient_id: 'ing-mm029', quantity: 2 },
+  { id: 'rd-m17-9', recipe_id: 'rec-mn17', ingredient_id: 'ing-pp013', quantity: 40 },
+  { id: 'rd-m17-10', recipe_id: 'rec-mn17', ingredient_id: 'ing-pp011', quantity: 2 },
+
+  // MN018: Nasi Goreng Mecamocha
+  { id: 'rd-m18-1', recipe_id: 'rec-mn18', ingredient_id: 'ing-mm008', quantity: 300 },
+  { id: 'rd-m18-2', recipe_id: 'rec-mn18', ingredient_id: 'ing-pp010', quantity: 30 },
+  { id: 'rd-m18-3', recipe_id: 'rec-mn18', ingredient_id: 'ing-mm029', quantity: 2 },
+  { id: 'rd-m18-4', recipe_id: 'rec-mn18', ingredient_id: 'ing-mm066', quantity: 2 },
+  { id: 'rd-m18-5', recipe_id: 'rec-mn18', ingredient_id: 'ing-mm090', quantity: 1 },
+  { id: 'rd-m18-6', recipe_id: 'rec-mn18', ingredient_id: 'ing-mm053', quantity: 2 },
+  { id: 'rd-m18-7', recipe_id: 'rec-mn18', ingredient_id: 'ing-mm046', quantity: 2 },
+  { id: 'rd-m18-8', recipe_id: 'rec-mn18', ingredient_id: 'ing-mm041', quantity: 5 },
+  { id: 'rd-m18-9', recipe_id: 'rec-mn18', ingredient_id: 'ing-mm080', quantity: 1 },
+  { id: 'rd-m18-10', recipe_id: 'rec-mn18', ingredient_id: 'ing-mm076', quantity: 1 },
+  { id: 'rd-m18-11', recipe_id: 'rec-mn18', ingredient_id: 'ing-mm005', quantity: 2 },
+  { id: 'rd-m18-12', recipe_id: 'rec-mn18', ingredient_id: 'ing-mm044', quantity: 20 },
+
+  // MN019: Nasi Telur Crispy
+  { id: 'rd-m19-1', recipe_id: 'rec-mn19', ingredient_id: 'ing-mm080', quantity: 1 },
+  { id: 'rd-m19-2', recipe_id: 'rec-mn19', ingredient_id: 'ing-pp019', quantity: 10 },
+  { id: 'rd-m19-3', recipe_id: 'rec-mn19', ingredient_id: 'ing-mm100', quantity: 15 },
+  { id: 'rd-m19-4', recipe_id: 'rec-mn19', ingredient_id: 'ing-mm090', quantity: 1 },
+  { id: 'rd-m19-5', recipe_id: 'rec-mn19', ingredient_id: 'ing-mm008', quantity: 200 },
+  { id: 'rd-m19-6', recipe_id: 'rec-mn19', ingredient_id: 'ing-mm066', quantity: 1 },
+  { id: 'rd-m19-7', recipe_id: 'rec-mn19', ingredient_id: 'ing-mm029', quantity: 1 },
+  { id: 'rd-m19-8', recipe_id: 'rec-mn19', ingredient_id: 'ing-pp002', quantity: 15 },
+
+  // MN020: Ayam Sambal Matah
+  { id: 'rd-m20-1', recipe_id: 'rec-mn20', ingredient_id: 'ing-pp001', quantity: 20 },
+  { id: 'rd-m20-2', recipe_id: 'rec-mn20', ingredient_id: 'ing-mm008', quantity: 200 },
+  { id: 'rd-m20-3', recipe_id: 'rec-mn20', ingredient_id: 'ing-mm022', quantity: 200 },
+  { id: 'rd-m20-4', recipe_id: 'rec-mn20', ingredient_id: 'ing-mm029', quantity: 3 },
+  { id: 'rd-m20-5', recipe_id: 'rec-mn20', ingredient_id: 'ing-mm046', quantity: 1 },
+  { id: 'rd-m20-6', recipe_id: 'rec-mn20', ingredient_id: 'ing-mm053', quantity: 1 },
+  { id: 'rd-m20-7', recipe_id: 'rec-mn20', ingredient_id: 'ing-mm066', quantity: 2 },
+  { id: 'rd-m20-8', recipe_id: 'rec-mn20', ingredient_id: 'ing-mm080', quantity: 1 },
+  { id: 'rd-m20-9', recipe_id: 'rec-mn20', ingredient_id: 'ing-pp019', quantity: 50 },
+  { id: 'rd-m20-10', recipe_id: 'rec-mn20', ingredient_id: 'ing-mm090', quantity: 1 },
+  { id: 'rd-m20-11', recipe_id: 'rec-mn20', ingredient_id: 'ing-pp003', quantity: 20 },
+
+  // MN021: Double Choco Cookies
+  { id: 'rd-m21-1', recipe_id: 'rec-mn21', ingredient_id: 'ing-mm034', quantity: 1 },
+  { id: 'rd-m21-2', recipe_id: 'rec-mn21', ingredient_id: 'ing-pp021', quantity: 1 },
 ];
 
 const todayISO = new Date().toISOString();

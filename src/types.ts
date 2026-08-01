@@ -61,7 +61,7 @@ export interface Recipe {
   version: number;
   is_active: boolean;
   notes?: string;
-  created_at: string;
+  created_at?: string;
 }
 
 export interface RecipeDetail {
