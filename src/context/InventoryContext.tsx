@@ -27,6 +27,7 @@ import {
   INITIAL_STOCK_MOVEMENTS,
 } from '../data/seedData';
 import { generateRefNo } from '../utils/formatters';
+import { getSupabase } from '../lib/supabase';
 
 interface ProductionSufficiencyResult {
   isSufficient: boolean;
@@ -104,17 +105,17 @@ interface InventoryContextType {
 }
 
 const STORAGE_KEYS = {
-  USERS: 'mecamocha_users_v1',
-  CURRENT_USER: 'mecamocha_current_user_v1',
-  UNITS: 'mecamocha_units_v1',
-  CATEGORIES: 'mecamocha_categories_v1',
-  SUPPLIERS: 'mecamocha_suppliers_v1',
-  INGREDIENTS: 'mecamocha_ingredients_v1',
-  MENUS: 'mecamocha_menus_v1',
-  RECIPES: 'mecamocha_recipes_v1',
-  RECIPE_DETAILS: 'mecamocha_recipe_details_v1',
-  TRANSACTIONS: 'mecamocha_transactions_v1',
-  STOCK_MOVEMENTS: 'mecamocha_stock_movements_v1',
+  USERS: 'mecamocha_users_v2',
+  CURRENT_USER: 'mecamocha_current_user_v2',
+  UNITS: 'mecamocha_units_v2',
+  CATEGORIES: 'mecamocha_categories_v2',
+  SUPPLIERS: 'mecamocha_suppliers_v2',
+  INGREDIENTS: 'mecamocha_ingredients_v2',
+  MENUS: 'mecamocha_menus_v2',
+  RECIPES: 'mecamocha_recipes_v2',
+  RECIPE_DETAILS: 'mecamocha_recipe_details_v2',
+  TRANSACTIONS: 'mecamocha_transactions_v2',
+  STOCK_MOVEMENTS: 'mecamocha_stock_movements_v2',
 };
 
 const InventoryContext = createContext<InventoryContextType | undefined>(undefined);
@@ -124,7 +125,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const loadFromStorage = <T,>(key: string, fallback: T): T => {
     try {
       const item = localStorage.getItem(key);
-      return item ? JSON.parse(item) : fallback;
+      if (!item) return fallback;
+      const parsed = JSON.parse(item);
+      // Fallback if legacy ingredients list with < 10 items (RAW-001 demo)
+      if (key === STORAGE_KEYS.INGREDIENTS && Array.isArray(parsed) && parsed.length < 50) {
+        return fallback;
+      }
+      return parsed;
     } catch {
       return fallback;
     }
@@ -150,6 +157,55 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [recipeDetails, setRecipeDetails] = useState<RecipeDetail[]>(() => loadFromStorage(STORAGE_KEYS.RECIPE_DETAILS, INITIAL_RECIPE_DETAILS));
   const [transactions, setTransactions] = useState<Transaction[]>(() => loadFromStorage(STORAGE_KEYS.TRANSACTIONS, INITIAL_TRANSACTIONS));
   const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => loadFromStorage(STORAGE_KEYS.STOCK_MOVEMENTS, INITIAL_STOCK_MOVEMENTS));
+
+  // Auto Fetch & Sync directly from Supabase on mount
+  useEffect(() => {
+    const syncFromSupabase = async () => {
+      try {
+        const supabase = getSupabase();
+        if (!supabase) return;
+
+        const [
+          { data: sbUnits },
+          { data: sbCategories },
+          { data: sbIngredients },
+          { data: sbMenus },
+          { data: sbRecipes },
+          { data: sbRecipeDetails },
+        ] = await Promise.all([
+          supabase.from('units').select('*'),
+          supabase.from('categories').select('*'),
+          supabase.from('ingredients').select('*').order('code', { ascending: true }),
+          supabase.from('menus').select('*').order('name', { ascending: true }),
+          supabase.from('recipes').select('*'),
+          supabase.from('recipe_details').select('*'),
+        ]);
+
+        if (sbIngredients && sbIngredients.length > 0) {
+          setIngredients(sbIngredients);
+        }
+        if (sbUnits && sbUnits.length > 0) {
+          setUnits(sbUnits);
+        }
+        if (sbCategories && sbCategories.length > 0) {
+          setCategories(sbCategories);
+        }
+        if (sbMenus && sbMenus.length > 0) {
+          setMenus(sbMenus);
+        }
+        if (sbRecipes && sbRecipes.length > 0) {
+          setRecipes(sbRecipes);
+        }
+        if (sbRecipeDetails && sbRecipeDetails.length > 0) {
+          setRecipeDetails(sbRecipeDetails);
+        }
+      } catch (e) {
+        console.log('Supabase auto-sync notice:', e);
+      }
+    };
+
+    syncFromSupabase();
+  }, []);
 
   // Sync to local storage
   useEffect(() => saveToStorage(STORAGE_KEYS.USERS, users), [users]);
