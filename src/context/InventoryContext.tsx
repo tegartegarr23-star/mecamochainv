@@ -165,6 +165,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [transactions, setTransactions] = useState<Transaction[]>(() => loadFromStorage(STORAGE_KEYS.TRANSACTIONS, INITIAL_TRANSACTIONS));
   const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => loadFromStorage(STORAGE_KEYS.STOCK_MOVEMENTS, INITIAL_STOCK_MOVEMENTS));
 
+  // Helper to merge local state and remote Supabase state without wiping un-synced items
+  const mergeByField = <T,>(localList: T[], remoteList: T[], key: keyof T): T[] => {
+    const map = new Map<any, T>();
+    localList.forEach((item) => {
+      if (item && item[key]) map.set(item[key], item);
+    });
+    remoteList.forEach((item) => {
+      if (item && item[key]) map.set(item[key], item);
+    });
+    return Array.from(map.values());
+  };
+
   // Sync data updates to Supabase
   const syncDataToSupabase = async (
     changedIngredients?: Ingredient[],
@@ -177,11 +189,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       if (changedIngredients && changedIngredients.length > 0) {
         const cleanIngredients = changedIngredients.map((ing) => ({
-          id: ing.id,
-          code: ing.code,
-          name: ing.name,
-          category_id: ing.category_id || null,
-          unit_id: ing.unit_id || null,
+          id: String(ing.id),
+          code: String(ing.code || ''),
+          name: String(ing.name || ''),
+          category_id: ing.category_id ? String(ing.category_id) : null,
+          unit_id: ing.unit_id ? String(ing.unit_id) : null,
           type: ing.type || 'raw',
           min_stock: Number(ing.min_stock) || 0,
           current_stock: Number(ing.current_stock) || 0,
@@ -189,37 +201,67 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           cost_per_unit: Number(ing.cost_per_unit) || 0,
         }));
 
-        const { error } = await supabase.from('ingredients').upsert(cleanIngredients);
-        if (error) {
-          console.error('Supabase ingredients upsert error:', error);
-          setSupabaseError(`Gagal sync bahan: ${error.message}`);
-          return;
-        }
-
-        // Explicitly update current_stock to guarantee direct field mutation in Supabase
-        for (const cleanIng of cleanIngredients) {
-          await supabase
-            .from('ingredients')
-            .update({ current_stock: cleanIng.current_stock })
-            .eq('id', cleanIng.id);
+        const { error: ingErr } = await supabase.from('ingredients').upsert(cleanIngredients);
+        if (ingErr) {
+          console.error('Supabase ingredients upsert error:', ingErr);
+          setSupabaseError(`Gagal sync bahan: ${ingErr.message}`);
+        } else {
+          // Explicitly update current_stock in Supabase table
+          for (const cleanIng of cleanIngredients) {
+            await supabase
+              .from('ingredients')
+              .update({ current_stock: cleanIng.current_stock })
+              .eq('id', cleanIng.id);
+          }
         }
       }
 
       if (newTrx) {
-        const { error } = await supabase.from('transactions').upsert([newTrx]);
-        if (error) {
-          console.error('Supabase transaction upsert error:', error);
-          setSupabaseError(`Gagal sync transaksi: ${error.message}`);
-          return;
+        const cleanTrx = {
+          id: String(newTrx.id),
+          type: String(newTrx.type),
+          transaction_date: newTrx.transaction_date || new Date().toISOString(),
+          reference_no: String(newTrx.reference_no || ''),
+          supplier_id: newTrx.supplier_id ? String(newTrx.supplier_id) : null,
+          menu_id: newTrx.menu_id ? String(newTrx.menu_id) : null,
+          portion_count: newTrx.portion_count !== undefined && newTrx.portion_count !== null ? Number(newTrx.portion_count) : null,
+          total_amount: newTrx.total_amount !== undefined && newTrx.total_amount !== null ? Number(newTrx.total_amount) : null,
+          notes: newTrx.notes || null,
+          created_by: newTrx.created_by || null,
+          adjustment_reason: newTrx.adjustment_reason || null,
+          created_at: newTrx.created_at || new Date().toISOString(),
+        };
+
+        const { error: trxErr } = await supabase.from('transactions').upsert([cleanTrx]);
+        if (trxErr) {
+          console.error('Supabase transaction upsert error:', trxErr);
+          setSupabaseError(`Gagal sync transaksi: ${trxErr.message}`);
         }
       }
 
       if (newMovements && newMovements.length > 0) {
-        const { error } = await supabase.from('stock_movements').upsert(newMovements);
-        if (error) {
-          console.error('Supabase movements upsert error:', error);
-          setSupabaseError(`Gagal sync mutasi: ${error.message}`);
-          return;
+        const cleanMovements = newMovements.map((m) => {
+          const foundIng = ingredients.find(
+            (i) =>
+              i.id === m.ingredient_id ||
+              String(i.code).toLowerCase() === String(m.ingredient_id).toLowerCase()
+          );
+          return {
+            id: String(m.id),
+            transaction_id: m.transaction_id ? String(m.transaction_id) : null,
+            ingredient_id: foundIng ? String(foundIng.id) : String(m.ingredient_id),
+            type: String(m.type),
+            quantity: Number(m.quantity) || 0,
+            balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : null,
+            description: m.description || null,
+            created_at: m.created_at || new Date().toISOString(),
+          };
+        });
+
+        const { error: movErr } = await supabase.from('stock_movements').upsert(cleanMovements);
+        if (movErr) {
+          console.error('Supabase movements upsert error:', movErr);
+          setSupabaseError(`Gagal sync mutasi: ${movErr.message}`);
         }
       }
 
@@ -244,6 +286,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const [
         { data: sbUnits },
         { data: sbCategories },
+        { data: sbSuppliers },
         { data: sbIngredients, error: ingErr },
         { data: sbMenus },
         { data: sbRecipes },
@@ -253,6 +296,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ] = await Promise.all([
         supabase.from('units').select('*'),
         supabase.from('categories').select('*'),
+        supabase.from('suppliers').select('*'),
         supabase.from('ingredients').select('*').order('code', { ascending: true }),
         supabase.from('menus').select('*').order('name', { ascending: true }),
         supabase.from('recipes').select('*'),
@@ -268,20 +312,32 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setSupabaseError(null);
       }
 
-      if (sbUnits && sbUnits.length > 0) setUnits(sbUnits);
-      if (sbCategories && sbCategories.length > 0) setCategories(sbCategories);
-      if (sbMenus && sbMenus.length > 0) setMenus(sbMenus);
-      if (sbRecipes && sbRecipes.length > 0) setRecipes(sbRecipes);
-      if (sbRecipeDetails && sbRecipeDetails.length > 0) setRecipeDetails(sbRecipeDetails);
-      if (sbTransactions && sbTransactions.length > 0) setTransactions(sbTransactions);
+      if (sbUnits && sbUnits.length > 0) setUnits((prev) => mergeByField(prev, sbUnits, 'id'));
+      if (sbCategories && sbCategories.length > 0) setCategories((prev) => mergeByField(prev, sbCategories, 'id'));
+      if (sbSuppliers && sbSuppliers.length > 0) setSuppliers((prev) => mergeByField(prev, sbSuppliers, 'id'));
+      if (sbMenus && sbMenus.length > 0) setMenus((prev) => mergeByField(prev, sbMenus, 'id'));
+      if (sbRecipes && sbRecipes.length > 0) setRecipes((prev) => mergeByField(prev, sbRecipes, 'id'));
+      if (sbRecipeDetails && sbRecipeDetails.length > 0) setRecipeDetails((prev) => mergeByField(prev, sbRecipeDetails, 'id'));
 
-      const movementsToUse = (sbStockMovements && sbStockMovements.length > 0) ? sbStockMovements : stockMovements;
-      if (sbStockMovements && sbStockMovements.length > 0) setStockMovements(sbStockMovements);
+      let allMovements = stockMovements;
+      if (sbStockMovements && sbStockMovements.length > 0) {
+        allMovements = mergeByField(stockMovements, sbStockMovements, 'id');
+        setStockMovements(allMovements);
+      }
 
-      const ingredientsToUse = (sbIngredients && sbIngredients.length > 0) ? sbIngredients : ingredients;
-      const mergedIngredients = ingredientsToUse.map((ing) => ({
+      if (sbTransactions && sbTransactions.length > 0) {
+        const mergedTrxs = mergeByField(transactions, sbTransactions, 'id');
+        setTransactions(mergedTrxs);
+      }
+
+      let allIngredients = ingredients;
+      if (sbIngredients && sbIngredients.length > 0) {
+        allIngredients = mergeByField(ingredients, sbIngredients, 'id');
+      }
+
+      const mergedIngredients = allIngredients.map((ing) => ({
         ...ing,
-        current_stock: getIngredientCurrentStock(ing, movementsToUse),
+        current_stock: getIngredientCurrentStock(ing, allMovements),
       }));
 
       setIngredients(mergedIngredients);
@@ -303,11 +359,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return false;
       }
 
-      // Step 1: Push reference tables first (units, categories, suppliers)
+      // Clean reference tables
+      const cleanUnits = units.map((u) => ({ id: String(u.id), name: String(u.name), abbreviation: String(u.abbreviation) }));
+      const cleanCategories = categories.map((c) => ({ id: String(c.id), name: String(c.name) }));
+      const cleanSuppliers = suppliers.map((s) => ({
+        id: String(s.id),
+        name: String(s.name),
+        contact: s.contact || null,
+        address: s.address || null,
+      }));
+
+      // Step 1: Push reference tables
       const refResults = await Promise.all([
-        supabase.from('units').upsert(units),
-        supabase.from('categories').upsert(categories),
-        supabase.from('suppliers').upsert(suppliers),
+        supabase.from('units').upsert(cleanUnits),
+        supabase.from('categories').upsert(cleanCategories),
+        supabase.from('suppliers').upsert(cleanSuppliers),
       ]);
       const refErr = refResults.find((r) => r.error)?.error;
       if (refErr) {
@@ -317,11 +383,51 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       // Step 2: Push ingredients and menus
+      const cleanIngs = ingredients.map((ing) => ({
+        id: String(ing.id),
+        code: String(ing.code || ''),
+        name: String(ing.name || ''),
+        category_id: ing.category_id ? String(ing.category_id) : null,
+        unit_id: ing.unit_id ? String(ing.unit_id) : null,
+        type: ing.type || 'raw',
+        min_stock: Number(ing.min_stock) || 0,
+        current_stock: getIngredientCurrentStock(ing, stockMovements),
+        is_active: ing.is_active ?? true,
+        cost_per_unit: Number(ing.cost_per_unit) || 0,
+      }));
+
+      const cleanMenus = menus.map((m) => ({
+        id: String(m.id),
+        name: String(m.name),
+        category_id: m.category_id ? String(m.category_id) : null,
+        price: Number(m.price) || 0,
+        cost_price: Number(m.cost_price) || 0,
+        is_active: m.is_active ?? true,
+        active_recipe_version: Number(m.active_recipe_version) || 1,
+        image_url: m.image_url || null,
+      }));
+
+      const cleanRecipes = recipes.map((r) => ({
+        id: String(r.id),
+        menu_id: String(r.menu_id),
+        version: Number(r.version) || 1,
+        is_active: r.is_active ?? true,
+        notes: r.notes || null,
+        created_at: r.created_at || new Date().toISOString(),
+      }));
+
+      const cleanRecipeDetails = recipeDetails.map((rd) => ({
+        id: String(rd.id),
+        recipe_id: String(rd.recipe_id),
+        ingredient_id: String(rd.ingredient_id),
+        quantity: Number(rd.quantity) || 0,
+      }));
+
       const mainResults = await Promise.all([
-        supabase.from('ingredients').upsert(ingredients),
-        supabase.from('menus').upsert(menus),
-        supabase.from('recipes').upsert(recipes),
-        supabase.from('recipe_details').upsert(recipeDetails),
+        supabase.from('ingredients').upsert(cleanIngs),
+        supabase.from('menus').upsert(cleanMenus),
+        supabase.from('recipes').upsert(cleanRecipes),
+        supabase.from('recipe_details').upsert(cleanRecipeDetails),
       ]);
       const mainErr = mainResults.find((r) => r.error)?.error;
       if (mainErr) {
@@ -330,10 +436,51 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return false;
       }
 
-      // Step 3: Push transactions and stock movements
+      // Step 3: Explicitly update current_stock in Supabase table for every ingredient
+      for (const ing of cleanIngs) {
+        await supabase
+          .from('ingredients')
+          .update({ current_stock: ing.current_stock })
+          .eq('id', ing.id);
+      }
+
+      // Step 4: Push transactions and stock movements
+      const cleanTrxs = transactions.map((t) => ({
+        id: String(t.id),
+        type: String(t.type),
+        transaction_date: t.transaction_date || new Date().toISOString(),
+        reference_no: String(t.reference_no || ''),
+        supplier_id: t.supplier_id ? String(t.supplier_id) : null,
+        menu_id: t.menu_id ? String(t.menu_id) : null,
+        portion_count: t.portion_count !== undefined && t.portion_count !== null ? Number(t.portion_count) : null,
+        total_amount: t.total_amount !== undefined && t.total_amount !== null ? Number(t.total_amount) : null,
+        notes: t.notes || null,
+        created_by: t.created_by || null,
+        adjustment_reason: t.adjustment_reason || null,
+        created_at: t.created_at || new Date().toISOString(),
+      }));
+
+      const cleanMovs = stockMovements.map((m) => {
+        const foundIng = ingredients.find(
+          (i) =>
+            i.id === m.ingredient_id ||
+            String(i.code).toLowerCase() === String(m.ingredient_id).toLowerCase()
+        );
+        return {
+          id: String(m.id),
+          transaction_id: m.transaction_id ? String(m.transaction_id) : null,
+          ingredient_id: foundIng ? String(foundIng.id) : String(m.ingredient_id),
+          type: String(m.type),
+          quantity: Number(m.quantity) || 0,
+          balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : null,
+          description: m.description || null,
+          created_at: m.created_at || new Date().toISOString(),
+        };
+      });
+
       const txResults = await Promise.all([
-        supabase.from('transactions').upsert(transactions),
-        supabase.from('stock_movements').upsert(stockMovements),
+        supabase.from('transactions').upsert(cleanTrxs),
+        supabase.from('stock_movements').upsert(cleanMovs),
       ]);
       const txErr = txResults.find((r) => r.error)?.error;
       if (txErr) {
@@ -343,6 +490,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       setLastSyncedAt(new Date());
+      setSupabaseError(null);
       return true;
     } catch (e: any) {
       console.error('Push exception:', e);
@@ -355,7 +503,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Auto Sync on Mount & Periodic Polling for Multi-Device Consistency
   useEffect(() => {
-    pullFromSupabase();
+    const initSync = async () => {
+      await pullFromSupabase();
+      // Ensure all local data (ingredients, transactions, stock movements) is synced to Supabase on startup
+      await pushAllToSupabase();
+    };
+    initSync();
 
     // Poll every 12 seconds to ensure changes on other devices sync automatically
     const interval = setInterval(() => {
