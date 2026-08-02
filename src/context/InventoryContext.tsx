@@ -312,35 +312,51 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setSupabaseError(null);
       }
 
-      if (sbUnits && sbUnits.length > 0) setUnits((prev) => mergeByField(prev, sbUnits, 'id'));
-      if (sbCategories && sbCategories.length > 0) setCategories((prev) => mergeByField(prev, sbCategories, 'id'));
-      if (sbSuppliers && sbSuppliers.length > 0) setSuppliers((prev) => mergeByField(prev, sbSuppliers, 'id'));
-      if (sbMenus && sbMenus.length > 0) setMenus((prev) => mergeByField(prev, sbMenus, 'id'));
-      if (sbRecipes && sbRecipes.length > 0) setRecipes((prev) => mergeByField(prev, sbRecipes, 'id'));
-      if (sbRecipeDetails && sbRecipeDetails.length > 0) setRecipeDetails((prev) => mergeByField(prev, sbRecipeDetails, 'id'));
+      if (sbUnits && sbUnits.length > 0) setUnits(sbUnits);
+      if (sbCategories && sbCategories.length > 0) setCategories(sbCategories);
+      if (sbSuppliers && sbSuppliers.length > 0) setSuppliers(sbSuppliers);
+      if (sbMenus && sbMenus.length > 0) setMenus(sbMenus);
+      if (sbRecipes && sbRecipes.length > 0) setRecipes(sbRecipes);
+      if (sbRecipeDetails && sbRecipeDetails.length > 0) setRecipeDetails(sbRecipeDetails);
 
-      let allMovements = stockMovements;
-      if (sbStockMovements && sbStockMovements.length > 0) {
-        allMovements = mergeByField(stockMovements, sbStockMovements, 'id');
-        setStockMovements(allMovements);
+      if (sbStockMovements) {
+        const cleanMovements = sbStockMovements.map((m) => ({
+          ...m,
+          id: String(m.id),
+          transaction_id: m.transaction_id ? String(m.transaction_id) : undefined,
+          ingredient_id: String(m.ingredient_id),
+          quantity: Number(m.quantity) || 0,
+          balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : undefined,
+          created_at: m.created_at || new Date().toISOString(),
+        }));
+        setStockMovements(cleanMovements);
       }
 
-      if (sbTransactions && sbTransactions.length > 0) {
-        const mergedTrxs = mergeByField(transactions, sbTransactions, 'id');
-        setTransactions(mergedTrxs);
+      if (sbTransactions) {
+        const cleanTransactions = sbTransactions.map((t) => ({
+          ...t,
+          id: String(t.id),
+          type: t.type,
+          transaction_date: t.transaction_date || new Date().toISOString(),
+          reference_no: String(t.reference_no || ''),
+          created_at: t.created_at || new Date().toISOString(),
+        }));
+        setTransactions(cleanTransactions);
       }
 
-      let allIngredients = ingredients;
       if (sbIngredients && sbIngredients.length > 0) {
-        allIngredients = mergeByField(ingredients, sbIngredients, 'id');
+        const cleanIngredients = sbIngredients.map((ing) => ({
+          ...ing,
+          id: String(ing.id),
+          code: String(ing.code || ''),
+          name: String(ing.name || ''),
+          current_stock: Number(ing.current_stock) || 0,
+          min_stock: Number(ing.min_stock) || 0,
+          cost_per_unit: Number(ing.cost_per_unit) || 0,
+        }));
+        setIngredients(cleanIngredients);
       }
 
-      const mergedIngredients = allIngredients.map((ing) => ({
-        ...ing,
-        current_stock: getIngredientCurrentStock(ing, allMovements),
-      }));
-
-      setIngredients(mergedIngredients);
       setLastSyncedAt(new Date());
     } catch (e: any) {
       console.warn('Supabase auto-sync notice:', e);
@@ -377,8 +393,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ]);
       const refErr = refResults.find((r) => r.error)?.error;
       if (refErr) {
-        console.error('Push reference tables error:', refErr);
-        setSupabaseError(refErr.message || 'Gagal push kategori/satuan');
+        console.warn('Push reference tables warning:', refErr);
+        const isRls = refErr.message?.toLowerCase().includes('security') || refErr.message?.toLowerCase().includes('policy') || refErr.code === '42501';
+        setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS). Klik "Fix Supabase" di kanan atas.' : (refErr.message || 'Gagal push kategori/satuan'));
         return false;
       }
 
@@ -431,8 +448,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ]);
       const mainErr = mainResults.find((r) => r.error)?.error;
       if (mainErr) {
-        console.error('Push ingredients/menus error:', mainErr);
-        setSupabaseError(mainErr.message || 'Gagal push bahan baku/menu');
+        console.warn('Push ingredients/menus warning:', mainErr);
+        const isRls = mainErr.message?.toLowerCase().includes('security') || mainErr.message?.toLowerCase().includes('policy') || mainErr.code === '42501';
+        setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS). Klik "Fix Supabase" di kanan atas.' : (mainErr.message || 'Gagal push bahan baku/menu'));
         return false;
       }
 
@@ -484,8 +502,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ]);
       const txErr = txResults.find((r) => r.error)?.error;
       if (txErr) {
-        console.error('Push transactions error:', txErr);
-        setSupabaseError(txErr.message || 'Gagal push transaksi/mutasi');
+        console.warn('Push transactions warning:', txErr);
+        const isRls = txErr.message?.toLowerCase().includes('security') || txErr.message?.toLowerCase().includes('policy') || txErr.code === '42501';
+        setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS). Klik "Fix Supabase" di kanan atas.' : (txErr.message || 'Gagal push transaksi/mutasi'));
         return false;
       }
 
@@ -493,7 +512,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setSupabaseError(null);
       return true;
     } catch (e: any) {
-      console.error('Push exception:', e);
+      console.warn('Push exception:', e);
       setSupabaseError(e?.message || 'Gagal koneksi Supabase');
       return false;
     } finally {
@@ -503,12 +522,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Auto Sync on Mount & Periodic Polling for Multi-Device Consistency
   useEffect(() => {
-    const initSync = async () => {
-      await pullFromSupabase();
-      // Ensure all local data (ingredients, transactions, stock movements) is synced to Supabase on startup
-      await pushAllToSupabase();
-    };
-    initSync();
+    // Pull from Supabase directly on startup so web app matches Supabase
+    pullFromSupabase();
 
     // Poll every 12 seconds to ensure changes on other devices sync automatically
     const interval = setInterval(() => {
