@@ -110,6 +110,7 @@ export const IngredientsManager: React.FC = () => {
         unit_id: formData.unit_id,
         type: formData.type,
         min_stock: Number(formData.min_stock),
+        current_stock: Number(formData.initial_stock),
         cost_per_unit: Number(formData.cost_per_unit),
         is_active: formData.is_active,
       });

@@ -175,25 +175,36 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const supabase = getSupabase();
       if (!supabase) return;
 
-      // Ensure prerequisite reference tables (units, categories, suppliers) exist in Supabase first
-      if (units && units.length > 0) {
-        await supabase.from('units').upsert(units);
-      }
-      if (categories && categories.length > 0) {
-        await supabase.from('categories').upsert(categories);
-      }
-      if (suppliers && suppliers.length > 0) {
-        await supabase.from('suppliers').upsert(suppliers);
-      }
-
       if (changedIngredients && changedIngredients.length > 0) {
-        const { error } = await supabase.from('ingredients').upsert(changedIngredients);
+        const cleanIngredients = changedIngredients.map((ing) => ({
+          id: ing.id,
+          code: ing.code,
+          name: ing.name,
+          category_id: ing.category_id || null,
+          unit_id: ing.unit_id || null,
+          type: ing.type || 'raw',
+          min_stock: Number(ing.min_stock) || 0,
+          current_stock: Number(ing.current_stock) || 0,
+          is_active: ing.is_active ?? true,
+          cost_per_unit: Number(ing.cost_per_unit) || 0,
+        }));
+
+        const { error } = await supabase.from('ingredients').upsert(cleanIngredients);
         if (error) {
           console.error('Supabase ingredients upsert error:', error);
           setSupabaseError(`Gagal sync bahan: ${error.message}`);
           return;
         }
+
+        // Explicitly update current_stock to guarantee direct field mutation in Supabase
+        for (const cleanIng of cleanIngredients) {
+          await supabase
+            .from('ingredients')
+            .update({ current_stock: cleanIng.current_stock })
+            .eq('id', cleanIng.id);
+        }
       }
+
       if (newTrx) {
         const { error } = await supabase.from('transactions').upsert([newTrx]);
         if (error) {
@@ -202,6 +213,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           return;
         }
       }
+
       if (newMovements && newMovements.length > 0) {
         const { error } = await supabase.from('stock_movements').upsert(newMovements);
         if (error) {
@@ -210,6 +222,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           return;
         }
       }
+
       setLastSyncedAt(new Date());
       setSupabaseError(null);
     } catch (e: any) {
