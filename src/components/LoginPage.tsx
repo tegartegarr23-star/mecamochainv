@@ -53,8 +53,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       <div className="w-full max-w-md relative z-10 space-y-6">
         {/* Brand Header */}
         <div className="text-center space-y-3">
-          <div className="inline-flex items-center justify-center p-3 bg-gradient-to-br from-amber-500 to-amber-700 text-white rounded-2xl shadow-xl border border-amber-400/30">
-            <Coffee className="w-8 h-8" />
+          <div className="inline-flex items-center justify-center p-1 bg-gradient-to-br from-orange-500 to-orange-700 text-white rounded-3xl shadow-2xl border border-orange-400/40">
+            <img
+              src="/src/assets/images/mecamocha_logo_1785676919844.jpg"
+              alt="Mecamocha Coffee Logo"
+              className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl object-cover shadow-lg"
+              referrerPolicy="no-referrer"
+            />
           </div>
           <div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">

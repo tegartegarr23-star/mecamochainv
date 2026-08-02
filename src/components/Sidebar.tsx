@@ -106,14 +106,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpe
         {/* Brand Header */}
         <div className="p-5 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-amber-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-xs">
-              M
-            </div>
+            <img
+              src="/src/assets/images/mecamocha_logo_1785676919844.jpg"
+              alt="Mecamocha Coffee Logo"
+              className="w-10 h-10 rounded-xl object-cover shadow-md border border-orange-500/40 shrink-0"
+              referrerPolicy="no-referrer"
+            />
             <div>
               <h1 className="text-white font-bold tracking-tight text-base leading-tight font-sans">
                 MECAMOCHA
               </h1>
-              <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Inventory System</p>
+              <p className="text-[10px] text-amber-500 font-semibold uppercase tracking-wider">Inventory System</p>
             </div>
           </div>
           <button
