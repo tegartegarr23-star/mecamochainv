@@ -594,89 +594,165 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-stone-900">Daftar Item Dibeli</h4>
+                <div>
+                  <h4 className="text-xs font-bold text-stone-900">Daftar Item Dibeli</h4>
+                  <p className="text-[11px] text-stone-500">Masukkan jumlah stok yang dibeli dan harga beli per unit (Rp)</p>
+                </div>
                 <button
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    const firstIng = ingredients[0];
                     setPurItems([
                       ...purItems,
-                      { ingredient_id: ingredients[0]?.id || '', quantity: 1000, unit_price: 50 },
-                    ])
-                  }
-                  className="text-xs font-bold text-emerald-700 hover:underline flex items-center gap-1"
+                      {
+                        ingredient_id: firstIng?.id || '',
+                        quantity: 100,
+                        unit_price: firstIng?.cost_per_unit || 0,
+                      },
+                    ]);
+                  }}
+                  className="text-xs font-bold text-emerald-700 hover:underline flex items-center gap-1 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200 hover:bg-emerald-100 transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" /> + Tambah Item
                 </button>
+              </div>
+
+              {/* Table Header Labels */}
+              <div className="hidden sm:grid grid-cols-12 gap-2 px-3 py-1.5 bg-stone-100 rounded-lg text-[10px] font-bold text-stone-600 uppercase tracking-wider">
+                <div className="col-span-5">Bahan Baku</div>
+                <div className="col-span-2 text-center">Jumlah (Qty)</div>
+                <div className="col-span-2 text-center">Harga Satuan (Rp)</div>
+                <div className="col-span-2 text-right">Subtotal (Rp)</div>
+                <div className="col-span-1 text-center">Hapus</div>
               </div>
 
               <div className="space-y-2">
                 {purItems.map((item, idx) => {
                   const ing = ingredients.find((i) => i.id === item.ingredient_id);
                   const unit = units.find((u) => u.id === ing?.unit_id);
+                  const subtotal = (item.quantity || 0) * (item.unit_price || 0);
 
                   return (
                     <div
                       key={idx}
-                      className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-stone-50 border border-stone-200"
+                      className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center p-3 rounded-xl bg-stone-50 border border-stone-200"
                     >
-                      <select
-                        value={item.ingredient_id}
-                        onChange={(e) => {
-                          const newItems = [...purItems];
-                          newItems[idx].ingredient_id = e.target.value;
-                          setPurItems(newItems);
-                        }}
-                        className="flex-1 min-w-48 px-3 py-2 text-xs font-bold rounded-lg bg-white border border-stone-200 focus:outline-none"
-                      >
-                        {ingredients.map((i) => (
-                          <option key={i.id} value={i.id}>
-                            {i.name} ({i.code})
-                          </option>
-                        ))}
-                      </select>
-
-                      <div className="w-36 flex items-center gap-1">
-                        <input
-                          type="number"
-                          step="any"
-                          required
-                          placeholder="Qty"
-                          value={item.quantity}
+                      {/* Ingredient Select */}
+                      <div className="sm:col-span-5">
+                        <label className="block text-[10px] font-semibold text-stone-500 sm:hidden mb-1">
+                          Pilih Bahan Baku
+                        </label>
+                        <select
+                          value={item.ingredient_id}
                           onChange={(e) => {
+                            const newIngId = e.target.value;
+                            const selectedIng = ingredients.find((i) => i.id === newIngId);
                             const newItems = [...purItems];
-                            newItems[idx].quantity = Number(e.target.value);
+                            newItems[idx].ingredient_id = newIngId;
+                            if (selectedIng?.cost_per_unit) {
+                              newItems[idx].unit_price = selectedIng.cost_per_unit;
+                            }
                             setPurItems(newItems);
                           }}
-                          className="w-full px-3 py-2 text-xs font-mono font-bold rounded-lg bg-white border border-stone-200 focus:outline-none"
-                        />
-                        <span className="text-xs font-bold text-stone-500">{unit?.abbreviation}</span>
+                          className="w-full px-3 py-2 text-xs font-bold rounded-lg bg-white border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        >
+                          {ingredients.map((i) => (
+                            <option key={i.id} value={i.id}>
+                              {i.name} ({i.code})
+                            </option>
+                          ))}
+                        </select>
                       </div>
 
-                      <div className="w-36">
-                        <input
-                          type="number"
-                          step="any"
-                          placeholder="Harga/Unit (Rp)"
-                          value={item.unit_price}
-                          onChange={(e) => {
-                            const newItems = [...purItems];
-                            newItems[idx].unit_price = Number(e.target.value);
-                            setPurItems(newItems);
-                          }}
-                          className="w-full px-3 py-2 text-xs font-mono rounded-lg bg-white border border-stone-200 focus:outline-none"
-                        />
+                      {/* Quantity Input */}
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-semibold text-stone-500 sm:hidden mb-1">
+                          Jumlah (Qty)
+                        </label>
+                        <div className="flex items-center gap-1 bg-white border border-stone-200 rounded-lg px-2 py-1.5 focus-within:ring-2 focus-within:ring-emerald-500">
+                          <input
+                            type="number"
+                            step="any"
+                            required
+                            min="0.001"
+                            placeholder="Qty"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const newItems = [...purItems];
+                              newItems[idx].quantity = Number(e.target.value);
+                              setPurItems(newItems);
+                            }}
+                            className="w-full text-xs font-mono font-bold text-stone-900 focus:outline-none"
+                          />
+                          <span className="text-[10px] font-bold text-stone-500 shrink-0">
+                            {unit?.abbreviation || 'unit'}
+                          </span>
+                        </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => setPurItems(purItems.filter((_, i) => i !== idx))}
-                        className="p-2 text-stone-400 hover:text-rose-600 rounded-lg hover:bg-rose-50"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {/* Unit Price Input with Rp Prefix */}
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-semibold text-stone-500 sm:hidden mb-1">
+                          Harga Satuan (Rp)
+                        </label>
+                        <div className="flex items-center bg-white border border-stone-200 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
+                          <span className="px-2 py-1.5 text-[10px] font-bold text-stone-500 bg-stone-100 border-r border-stone-200 shrink-0">
+                            Rp
+                          </span>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            placeholder="Harga/Unit"
+                            value={item.unit_price}
+                            onChange={(e) => {
+                              const newItems = [...purItems];
+                              newItems[idx].unit_price = Number(e.target.value);
+                              setPurItems(newItems);
+                            }}
+                            className="w-full px-2 py-1.5 text-xs font-mono font-bold text-stone-900 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Subtotal Display */}
+                      <div className="sm:col-span-2 text-right">
+                        <span className="text-[10px] text-stone-400 sm:hidden">Subtotal: </span>
+                        <span className="text-xs font-extrabold text-emerald-900 font-mono">
+                          {formatCurrency(subtotal)}
+                        </span>
+                      </div>
+
+                      {/* Remove Button */}
+                      <div className="sm:col-span-1 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setPurItems(purItems.filter((_, i) => i !== idx))}
+                          disabled={purItems.length <= 1}
+                          className="p-1.5 text-stone-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-30 disabled:hover:bg-transparent"
+                          title="Hapus baris"
+                        >
+                          <Trash2 className="w-4 h-4 mx-auto" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
+              </div>
+
+              {/* Purchase Total Summary */}
+              <div className="flex items-center justify-between p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <div className="text-xs font-semibold text-emerald-900">
+                  Total {purItems.length} Item Bahan Baku Dibeli
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] text-emerald-700 font-medium block">Total Estimasi Biaya Pembelian</span>
+                  <span className="text-base font-extrabold text-emerald-900 font-mono">
+                    {formatCurrency(
+                      purItems.reduce((acc, item) => acc + (item.quantity || 0) * (item.unit_price || 0), 0)
+                    )}
+                  </span>
+                </div>
               </div>
             </div>
 
