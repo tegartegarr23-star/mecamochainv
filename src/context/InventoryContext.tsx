@@ -896,17 +896,36 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Daily Stock Report Generator
   const getDailyStockReport = (dateFilter: string): DailyStockRow[] => {
-    const filterDate = dateFilter ? new Date(dateFilter).toDateString() : new Date().toDateString();
+    // Standardize filter date to local YYYY-MM-DD
+    const getYYYYMMDD = (input: string | Date): string => {
+      if (!input) return new Date().toISOString().slice(0, 10);
+      if (typeof input === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input)) {
+        return input;
+      }
+      const d = new Date(input);
+      if (isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    const targetDate = getYYYYMMDD(dateFilter);
 
     return ingredients.map((ing) => {
       const unit = units.find((u) => u.id === ing.unit_id) || ({ abbreviation: '-' } as Unit);
       const cat = categories.find((c) => c.id === ing.category_id) || ({ name: '-' } as Category);
 
-      // Movements for this ingredient up to or on filterDate
-      const ingMovements = stockMovements.filter((m) => {
+      // Movements on targetDate
+      const movementsToday = stockMovements.filter((m) => {
         if (m.ingredient_id !== ing.id) return false;
-        const movDate = new Date(m.created_at).toDateString();
-        return movDate === filterDate;
+        return getYYYYMMDD(m.created_at) === targetDate;
+      });
+
+      // Movements created AFTER targetDate (future relative to report date)
+      const movementsAfter = stockMovements.filter((m) => {
+        if (m.ingredient_id !== ing.id) return false;
+        return getYYYYMMDD(m.created_at) > targetDate;
       });
 
       let in_purchase = 0;
@@ -916,27 +935,45 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       let in_adjustment = 0;
       let out_adjustment = 0;
 
-      ingMovements.forEach((m) => {
+      movementsToday.forEach((m) => {
         const trx = transactions.find((t) => t.id === m.transaction_id);
-        if (!trx) return;
+        const descLower = m.description ? m.description.toLowerCase() : '';
+        const isAdj = trx?.type === 'adjustment' || descLower.includes('penyesuaian') || descLower.includes('opname');
 
-        if (trx.type === 'purchase' && m.type === 'in') {
-          in_purchase += m.quantity;
-        } else if (trx.type === 'prepare') {
-          if (m.type === 'in') in_prepare += m.quantity;
-          if (m.type === 'out') out_prepare += m.quantity;
-        } else if (trx.type === 'production' && m.type === 'out') {
-          out_production += m.quantity;
-        } else if (trx.type === 'adjustment') {
-          if (m.type === 'in') in_adjustment += m.quantity;
-          if (m.type === 'out') out_adjustment += m.quantity;
+        if (trx?.type === 'purchase') {
+          if (m.type === 'in') in_purchase += Number(m.quantity) || 0;
+        } else if (trx?.type === 'prepare') {
+          if (m.type === 'in') in_prepare += Number(m.quantity) || 0;
+          if (m.type === 'out') out_prepare += Number(m.quantity) || 0;
+        } else if (trx?.type === 'production') {
+          if (m.type === 'out') out_production += Number(m.quantity) || 0;
+        } else if (isAdj) {
+          if (m.type === 'in') in_adjustment += Number(m.quantity) || 0;
+          if (m.type === 'out') out_adjustment += Number(m.quantity) || 0;
+        } else {
+          // Fallback if transaction type is missing
+          if (m.type === 'in') in_adjustment += Number(m.quantity) || 0;
+          if (m.type === 'out') out_adjustment += Number(m.quantity) || 0;
         }
       });
 
-      // Calculate initial stock before today
+      // Future movements calculation
+      let in_after = 0;
+      let out_after = 0;
+      movementsAfter.forEach((m) => {
+        if (m.type === 'in') in_after += Number(m.quantity) || 0;
+        if (m.type === 'out') out_after += Number(m.quantity) || 0;
+      });
+
+      // Stock at the end of targetDate
+      const final_stock = Number(ing.current_stock) - in_after + out_after;
+
+      // Total changes on targetDate
       const totalTodayIn = in_purchase + in_prepare + in_adjustment;
       const totalTodayOut = out_prepare + out_production + out_adjustment;
-      const initial_stock = ing.current_stock - totalTodayIn + totalTodayOut;
+
+      // Stock at the beginning of targetDate
+      const initial_stock = final_stock - totalTodayIn + totalTodayOut;
 
       return {
         ingredient: ing,
@@ -949,7 +986,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         out_production,
         in_adjustment,
         out_adjustment,
-        final_stock: ing.current_stock,
+        final_stock: Math.max(0, final_stock),
       };
     });
   };

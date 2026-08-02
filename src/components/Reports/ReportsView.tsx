@@ -9,6 +9,7 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   BookOpen,
+  RefreshCw,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
 import { formatNumber, formatDate } from '../../utils/formatters';
@@ -20,7 +21,8 @@ import {
 } from '../../utils/export';
 
 export const ReportsView: React.FC = () => {
-  const { ingredients, units, getDailyStockReport, getIngredientLedger } = useInventory();
+  const { ingredients, units, getDailyStockReport, getIngredientLedger, pullFromSupabase, isSyncing } = useInventory();
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Tab: Stock Report vs Ledger
   const [reportTab, setReportTab] = useState<'daily' | 'ledger'>('daily');
@@ -31,6 +33,12 @@ export const ReportsView: React.FC = () => {
 
   // Ledger State
   const [selectedIngredientId, setSelectedIngredientId] = useState(ingredients[0]?.id || '');
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await pullFromSupabase();
+    setTimeout(() => setIsRefreshing(false), 500);
+  };
 
   const dailyReportData = getDailyStockReport(reportDate).filter((row) =>
     row.ingredient.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
@@ -67,6 +75,16 @@ export const ReportsView: React.FC = () => {
             <BookOpen className="w-4 h-4" /> Mutasi Stok (Stock Ledger)
           </button>
         </div>
+
+        <button
+          onClick={handleRefresh}
+          disabled={isRefreshing || isSyncing}
+          className="flex items-center gap-1.5 px-3.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-xl text-xs font-bold transition-all disabled:opacity-50 border border-stone-300"
+          title="Refresh Data dari Supabase"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing || isSyncing ? 'animate-spin text-amber-800' : 'text-stone-600'}`} />
+          <span>Refresh Data</span>
+        </button>
       </div>
 
       {/* REPORT 1: DAILY STOCK REPORT */}
@@ -98,8 +116,15 @@ export const ReportsView: React.FC = () => {
               </div>
             </div>
 
-            {/* Export Buttons */}
+            {/* Export & Refresh Buttons */}
             <div className="flex items-center gap-2">
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing || isSyncing}
+                className="flex items-center gap-1.5 px-3 py-2 bg-amber-800 hover:bg-amber-900 text-white rounded-xl text-xs font-bold shadow-xs transition-all disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing || isSyncing ? 'animate-spin' : ''}`} /> Refresh
+              </button>
               <button
                 onClick={() => exportDailyStockToExcel(dailyReportData, reportDate)}
                 className="flex items-center gap-1.5 px-3 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all"
