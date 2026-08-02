@@ -6,8 +6,6 @@ import {
   ArrowRightLeft,
   FileSpreadsheet,
   Users,
-  Database,
-  Coffee,
   X,
   ChevronRight,
   ShieldCheck,
@@ -18,6 +16,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { useInventory } from '../context/InventoryContext';
+import { MecamochaBrandLogo } from './MecamochaBrandLogo';
 
 export type NavTab =
   | 'dashboard'
@@ -106,12 +105,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpe
         {/* Brand Header */}
         <div className="p-5 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <img
-              src="/src/assets/images/mecamocha_logo_1785676919844.jpg"
-              alt="Mecamocha Coffee Logo"
-              className="w-10 h-10 rounded-xl object-cover shadow-md border border-orange-500/40 shrink-0"
-              referrerPolicy="no-referrer"
-            />
+            <MecamochaBrandLogo size="md" />
             <div>
               <h1 className="text-white font-bold tracking-tight text-base leading-tight font-sans">
                 MECAMOCHA

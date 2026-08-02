@@ -10,6 +10,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useInventory } from '../context/InventoryContext';
+import { MecamochaBrandLogo } from './MecamochaBrandLogo';
 
 interface LoginPageProps {
   onLoginSuccess: () => void;
@@ -53,13 +54,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       <div className="w-full max-w-md relative z-10 space-y-6">
         {/* Brand Header */}
         <div className="text-center space-y-3">
-          <div className="inline-flex items-center justify-center p-1 bg-gradient-to-br from-orange-500 to-orange-700 text-white rounded-3xl shadow-2xl border border-orange-400/40">
-            <img
-              src="/src/assets/images/mecamocha_logo_1785676919844.jpg"
-              alt="Mecamocha Coffee Logo"
-              className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl object-cover shadow-lg"
-              referrerPolicy="no-referrer"
-            />
+          <div className="inline-flex items-center justify-center">
+            <MecamochaBrandLogo size="login" />
           </div>
           <div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
