@@ -175,17 +175,40 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const supabase = getSupabase();
       if (!supabase) return;
 
+      // Ensure prerequisite reference tables (units, categories, suppliers) exist in Supabase first
+      if (units && units.length > 0) {
+        await supabase.from('units').upsert(units);
+      }
+      if (categories && categories.length > 0) {
+        await supabase.from('categories').upsert(categories);
+      }
+      if (suppliers && suppliers.length > 0) {
+        await supabase.from('suppliers').upsert(suppliers);
+      }
+
       if (changedIngredients && changedIngredients.length > 0) {
         const { error } = await supabase.from('ingredients').upsert(changedIngredients);
-        if (error) console.error('Supabase ingredients upsert error:', error);
+        if (error) {
+          console.error('Supabase ingredients upsert error:', error);
+          setSupabaseError(`Gagal sync bahan: ${error.message}`);
+          return;
+        }
       }
       if (newTrx) {
         const { error } = await supabase.from('transactions').upsert([newTrx]);
-        if (error) console.error('Supabase transaction upsert error:', error);
+        if (error) {
+          console.error('Supabase transaction upsert error:', error);
+          setSupabaseError(`Gagal sync transaksi: ${error.message}`);
+          return;
+        }
       }
       if (newMovements && newMovements.length > 0) {
         const { error } = await supabase.from('stock_movements').upsert(newMovements);
-        if (error) console.error('Supabase movements upsert error:', error);
+        if (error) {
+          console.error('Supabase movements upsert error:', error);
+          setSupabaseError(`Gagal sync mutasi: ${error.message}`);
+          return;
+        }
       }
       setLastSyncedAt(new Date());
       setSupabaseError(null);
@@ -212,8 +235,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         { data: sbMenus },
         { data: sbRecipes },
         { data: sbRecipeDetails },
-        { data: sbTransactions },
-        { data: sbStockMovements },
+        { data: sbTransactions, error: trxErr },
+        { data: sbStockMovements, error: movErr },
       ] = await Promise.all([
         supabase.from('units').select('*'),
         supabase.from('categories').select('*'),
@@ -225,8 +248,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         supabase.from('stock_movements').select('*').order('created_at', { ascending: false }),
       ]);
 
-      if (ingErr) {
-        setSupabaseError(ingErr.message);
+      if (ingErr || trxErr || movErr) {
+        const errMsg = ingErr?.message || trxErr?.message || movErr?.message || 'Error fetching Supabase data';
+        setSupabaseError(errMsg);
       } else {
         setSupabaseError(null);
       }
@@ -260,22 +284,42 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return false;
       }
 
-      const results = await Promise.all([
+      // Step 1: Push reference tables first (units, categories, suppliers)
+      const refResults = await Promise.all([
         supabase.from('units').upsert(units),
         supabase.from('categories').upsert(categories),
         supabase.from('suppliers').upsert(suppliers),
+      ]);
+      const refErr = refResults.find((r) => r.error)?.error;
+      if (refErr) {
+        console.error('Push reference tables error:', refErr);
+        setSupabaseError(refErr.message || 'Gagal push kategori/satuan');
+        return false;
+      }
+
+      // Step 2: Push ingredients and menus
+      const mainResults = await Promise.all([
         supabase.from('ingredients').upsert(ingredients),
         supabase.from('menus').upsert(menus),
         supabase.from('recipes').upsert(recipes),
         supabase.from('recipe_details').upsert(recipeDetails),
+      ]);
+      const mainErr = mainResults.find((r) => r.error)?.error;
+      if (mainErr) {
+        console.error('Push ingredients/menus error:', mainErr);
+        setSupabaseError(mainErr.message || 'Gagal push bahan baku/menu');
+        return false;
+      }
+
+      // Step 3: Push transactions and stock movements
+      const txResults = await Promise.all([
         supabase.from('transactions').upsert(transactions),
         supabase.from('stock_movements').upsert(stockMovements),
       ]);
-
-      const err = results.find((r) => r.error)?.error;
-      if (err) {
-        console.error('Push all to Supabase error:', err);
-        setSupabaseError(err.message || 'Gagal push data ke Supabase');
+      const txErr = txResults.find((r) => r.error)?.error;
+      if (txErr) {
+        console.error('Push transactions error:', txErr);
+        setSupabaseError(txErr.message || 'Gagal push transaksi/mutasi');
         return false;
       }
 
