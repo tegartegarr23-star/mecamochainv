@@ -278,25 +278,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const movementsToUse = (sbStockMovements && sbStockMovements.length > 0) ? sbStockMovements : stockMovements;
       if (sbStockMovements && sbStockMovements.length > 0) setStockMovements(sbStockMovements);
 
-      if (sbIngredients && sbIngredients.length > 0) {
-        const mergedIngredients = sbIngredients.map((ing) => {
-          const ingMovs = movementsToUse.filter(
-            (m) => m.ingredient_id === ing.id || m.ingredient_id === ing.code
-          );
-          if (ingMovs.length > 0) {
-            const sortedMovs = [...ingMovs].sort(
-              (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-            );
-            const latest = sortedMovs[0];
-            if (latest.balance_after !== undefined && latest.balance_after !== null) {
-              return { ...ing, current_stock: Number(latest.balance_after) };
-            }
-          }
-          return { ...ing, current_stock: Number(ing.current_stock) || 0 };
-        });
+      const ingredientsToUse = (sbIngredients && sbIngredients.length > 0) ? sbIngredients : ingredients;
+      const mergedIngredients = ingredientsToUse.map((ing) => ({
+        ...ing,
+        current_stock: getIngredientCurrentStock(ing, movementsToUse),
+      }));
 
-        setIngredients(mergedIngredients);
-      }
+      setIngredients(mergedIngredients);
       setLastSyncedAt(new Date());
     } catch (e: any) {
       console.warn('Supabase auto-sync notice:', e);
@@ -843,6 +831,30 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   };
 
+  // Helper to get actual current stock based on latest stock movement balance_after
+  const getIngredientCurrentStock = (ing: Ingredient, movements: StockMovement[]): number => {
+    if (!ing) return 0;
+    const ingId = String(ing.id || '').trim().toLowerCase();
+    const ingCode = String(ing.code || '').trim().toLowerCase();
+
+    const ingMovs = movements.filter((m) => {
+      if (!m || !m.ingredient_id) return false;
+      const mId = String(m.ingredient_id).trim().toLowerCase();
+      return mId === ingId || mId === ingCode;
+    });
+
+    if (ingMovs.length > 0) {
+      const sortedMovs = [...ingMovs].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      const latest = sortedMovs[0];
+      if (latest && latest.balance_after !== undefined && latest.balance_after !== null) {
+        return Number(latest.balance_after);
+      }
+    }
+    return Number(ing.current_stock) || 0;
+  };
+
   const addAdjustmentTransaction = (
     date: string,
     ingredientId: string,
@@ -851,28 +863,30 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     reason: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other',
     notes: string
   ) => {
-    const ing = ingredients.find((i) => i.id === ingredientId);
+    const ing = ingredients.find((i) => i.id === ingredientId || i.code === ingredientId);
     if (!ing) return;
 
     const trxId = `trx-adj-${Date.now()}`;
     const refNo = generateRefNo('ADJ');
     const qty = Number(quantity);
 
-    let newStock = ing.current_stock;
+    const currentStock = getIngredientCurrentStock(ing, stockMovements);
+
+    let newStock = currentStock;
     let moveQty = qty;
     let moveType: 'in' | 'out' = 'out';
 
     if (mode === 'set') {
       newStock = Math.max(0, qty);
-      const diff = newStock - ing.current_stock;
+      const diff = newStock - currentStock;
       moveType = diff >= 0 ? 'in' : 'out';
       moveQty = Math.abs(diff);
     } else if (mode === 'plus') {
-      newStock = ing.current_stock + qty;
+      newStock = currentStock + qty;
       moveType = 'in';
       moveQty = qty;
     } else {
-      newStock = Math.max(0, ing.current_stock - qty);
+      newStock = Math.max(0, currentStock - qty);
       moveType = 'out';
       moveQty = qty;
     }
@@ -893,18 +907,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const newMov: StockMovement = {
       id: `mov-${Date.now()}`,
       transaction_id: trxId,
-      ingredient_id: ingredientId,
+      ingredient_id: ing.id,
       type: moveType,
       quantity: moveQty,
       balance_after: newStock,
       description: mode === 'set'
-        ? `Stock Opname (Set Langsung): ${ing.current_stock} -> ${newStock} (${notes || reason})`
+        ? `Stock Opname (Set Langsung): ${currentStock} -> ${newStock} (${notes || reason})`
         : `Penyesuaian Stok (${moveType === 'in' ? '+' : '-'}) Alasan: ${reason} - ${notes}`,
       created_at: new Date().toISOString(),
     };
 
     setIngredients((prev) =>
-      prev.map((i) => (i.id === ingredientId ? updatedIng : i))
+      prev.map((i) => (i.id === ing.id ? updatedIng : i))
     );
     setTransactions((prev) => [newTrx, ...prev]);
     setStockMovements((prev) => [newMov, ...prev]);
@@ -934,15 +948,25 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const unit = units.find((u) => u.id === ing.unit_id) || ({ abbreviation: '-' } as Unit);
       const cat = categories.find((c) => c.id === ing.category_id) || ({ name: '-' } as Category);
 
+      const liveStock = getIngredientCurrentStock(ing, stockMovements);
+
       // Movements on targetDate
       const movementsToday = stockMovements.filter((m) => {
-        if (m.ingredient_id !== ing.id && m.ingredient_id !== ing.code) return false;
+        if (!m || !m.ingredient_id) return false;
+        const mId = String(m.ingredient_id).trim().toLowerCase();
+        const ingId = String(ing.id).trim().toLowerCase();
+        const ingCode = String(ing.code || '').trim().toLowerCase();
+        if (mId !== ingId && mId !== ingCode) return false;
         return getYYYYMMDD(m.created_at) === targetDate;
       });
 
       // Movements created AFTER targetDate (future relative to report date)
       const movementsAfter = stockMovements.filter((m) => {
-        if (m.ingredient_id !== ing.id && m.ingredient_id !== ing.code) return false;
+        if (!m || !m.ingredient_id) return false;
+        const mId = String(m.ingredient_id).trim().toLowerCase();
+        const ingId = String(ing.id).trim().toLowerCase();
+        const ingCode = String(ing.code || '').trim().toLowerCase();
+        if (mId !== ingId && mId !== ingCode) return false;
         return getYYYYMMDD(m.created_at) > targetDate;
       });
 
@@ -984,7 +1008,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
 
       // Stock at the end of targetDate
-      const final_stock = Number(ing.current_stock) - in_after + out_after;
+      const final_stock = liveStock - in_after + out_after;
 
       // Total changes on targetDate
       const totalTodayIn = in_purchase + in_prepare + in_adjustment;
@@ -994,7 +1018,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const initial_stock = final_stock - totalTodayIn + totalTodayOut;
 
       return {
-        ingredient: ing,
+        ingredient: { ...ing, current_stock: liveStock },
         unit,
         category: cat,
         initial_stock: Math.max(0, initial_stock),
@@ -1010,10 +1034,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const getIngredientLedger = (ingredientId: string): StockMovement[] => {
-    const targetIng = ingredients.find((i) => i.id === ingredientId || i.code === ingredientId);
-    const code = targetIng?.code;
+    const targetIng = ingredients.find(
+      (i) =>
+        String(i.id).toLowerCase() === String(ingredientId).toLowerCase() ||
+        String(i.code).toLowerCase() === String(ingredientId).toLowerCase()
+    );
+    const targetId = String(targetIng?.id || ingredientId).toLowerCase();
+    const targetCode = String(targetIng?.code || '').toLowerCase();
+
     return stockMovements
-      .filter((m) => m.ingredient_id === ingredientId || (code && m.ingredient_id === code))
+      .filter((m) => {
+        if (!m || !m.ingredient_id) return false;
+        const mId = String(m.ingredient_id).toLowerCase();
+        return mId === targetId || mId === targetCode;
+      })
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   };
 
