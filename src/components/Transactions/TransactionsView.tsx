@@ -88,9 +88,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   // 4. Adjustment Form State
   const [adjDate, setAdjDate] = useState(new Date().toISOString().slice(0, 10));
   const [adjIngredientId, setAdjIngredientId] = useState(ingredients[0]?.id || '');
-  const [adjQty, setAdjQty] = useState(100);
-  const [adjMode, setAdjMode] = useState<'plus' | 'minus'>('minus');
-  const [adjReason, setAdjReason] = useState<'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other'>('Damage');
+  const [adjQty, setAdjQty] = useState(0);
+  const [adjMode, setAdjMode] = useState<'plus' | 'minus' | 'set'>('set');
+  const [adjReason, setAdjReason] = useState<'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other'>('Stock Opname');
   const [adjNotes, setAdjNotes] = useState('');
 
   // Submit Purchase
@@ -795,9 +795,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                 <label className="block text-xs font-semibold text-stone-700 mb-1">Tipe Penyesuaian</label>
                 <select
                   value={adjMode}
-                  onChange={(e) => setAdjMode(e.target.value as 'plus' | 'minus')}
+                  onChange={(e) => setAdjMode(e.target.value as 'plus' | 'minus' | 'set')}
                   className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                 >
+                  <option value="set">Set Stok Fisik (Opname Langsung)</option>
                   <option value="minus">Keluar (-) Penurunan Stok</option>
                   <option value="plus">Masuk (+) Penambahan Stok</option>
                 </select>
@@ -821,7 +822,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Kuantitas Penyesuaian</label>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">
+                  {adjMode === 'set' ? 'Jumlah Stok Fisik Hasil Opname' : 'Kuantitas Penyesuaian'}
+                </label>
                 <input
                   type="number"
                   step="any"
@@ -835,19 +838,61 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                 <label className="block text-xs font-semibold text-stone-700 mb-1">Alasan Penyesuaian</label>
                 <select
                   value={adjReason}
-                  onChange={(e) =>
-                    setAdjReason(e.target.value as 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other')
-                  }
+                  onChange={(e) => {
+                    const r = e.target.value as 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other';
+                    setAdjReason(r);
+                    if (r === 'Stock Opname') setAdjMode('set');
+                  }}
                   className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                 >
+                  <option value="Stock Opname">Stock Opname (Hasil Cek Fisik)</option>
                   <option value="Damage">Damage (Kerusakan)</option>
                   <option value="Expired">Expired (Kadaluwarsa)</option>
                   <option value="Loss">Loss (Kehilangan)</option>
-                  <option value="Stock Opname">Stock Opname (Selisih)</option>
                   <option value="Other">Lainnya</option>
                 </select>
               </div>
             </div>
+
+            {/* Live Preview Calculation */}
+            {(() => {
+              const currentIng = ingredients.find((i) => i.id === adjIngredientId) || ingredients[0];
+              if (!currentIng) return null;
+
+              const targetStock =
+                adjMode === 'set'
+                  ? adjQty
+                  : adjMode === 'plus'
+                  ? currentIng.current_stock + adjQty
+                  : Math.max(0, currentIng.current_stock - adjQty);
+
+              const diff = targetStock - currentIng.current_stock;
+
+              return (
+                <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-900 font-medium">
+                  <div className="font-bold flex justify-between">
+                    <span>Pratinjau Hasil Adjustment:</span>
+                    <span>{currentIng.name}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-stone-700">
+                    <span>
+                      Stok Lama: <strong>{formatNumber(currentIng.current_stock)}</strong>
+                    </span>
+                    <span>➔</span>
+                    <span>
+                      Stok Baru:{' '}
+                      <strong className="text-purple-800 font-extrabold text-sm font-mono">
+                        {formatNumber(targetStock)}
+                      </strong>
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[11px] text-purple-700">
+                    Perubahan Mutasi: {diff >= 0 ? '+' : ''}
+                    {formatNumber(diff)}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">Keterangan / Notes</label>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu as MenuIcon, AlertTriangle, UserCheck, Plus, ShoppingBag, ChefHat, ArrowUpRight, ShieldCheck, LogOut } from 'lucide-react';
+import { Menu as MenuIcon, AlertTriangle, UserCheck, Plus, ShoppingBag, ChefHat, LogOut, Cloud, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { useInventory } from '../context/InventoryContext';
 import { NavTab } from './Sidebar';
 
@@ -11,7 +11,17 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ activeTab, setIsOpenSidebar, onOpenQuickAction, onLogout }) => {
-  const { users, currentUser, setCurrentUser, ingredients } = useInventory();
+  const {
+    users,
+    currentUser,
+    setCurrentUser,
+    ingredients,
+    isSyncing,
+    lastSyncedAt,
+    supabaseError,
+    pushAllToSupabase,
+    pullFromSupabase,
+  } = useInventory();
 
   // Calculate critical stock count
   const criticalStockCount = ingredients.filter((i) => i.is_active && i.current_stock <= i.min_stock).length;
@@ -91,6 +101,35 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setIsOpenSidebar, onO
             </button>
           </div>
         )}
+
+        {/* Supabase Sync Badge & Button */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => pushAllToSupabase()}
+            disabled={isSyncing}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-semibold transition-all ${
+              isSyncing
+                ? 'bg-blue-50 border-blue-200 text-blue-700 cursor-wait'
+                : supabaseError
+                ? 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'
+                : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+            }`}
+            title={
+              supabaseError
+                ? `Peringatan Sync: ${supabaseError}. Klik untuk dorong ulang data ke Supabase.`
+                : `Supabase Terhubung. Terakhir sync: ${lastSyncedAt ? lastSyncedAt.toLocaleTimeString() : 'Baru saja'}. Klik untuk Sync Manual.`
+            }
+          >
+            {isSyncing ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
+            ) : (
+              <Cloud className="w-3.5 h-3.5 text-emerald-600" />
+            )}
+            <span className="hidden md:inline font-medium">
+              {isSyncing ? 'Syncing...' : supabaseError ? 'Sync Error' : 'Supabase Active'}
+            </span>
+          </button>
+        </div>
 
         {/* Critical Stock Alert Badge */}
         {criticalStockCount > 0 && (

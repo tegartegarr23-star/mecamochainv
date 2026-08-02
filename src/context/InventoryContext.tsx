@@ -93,7 +93,14 @@ interface InventoryContextType {
   checkProductionSufficiency: (menuId: string, portionCount: number) => ProductionSufficiencyResult;
   addProductionTransaction: (date: string, menuId: string, portionCount: number, refNo: string, notes: string) => { success: boolean; message: string };
   
-  addAdjustmentTransaction: (date: string, ingredientId: string, quantity: number, mode: 'plus' | 'minus', reason: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other', notes: string) => void;
+  addAdjustmentTransaction: (date: string, ingredientId: string, quantity: number, mode: 'plus' | 'minus' | 'set', reason: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other', notes: string) => void;
+
+  // Sync & Supabase
+  isSyncing: boolean;
+  lastSyncedAt: Date | null;
+  supabaseError: string | null;
+  pushAllToSupabase: () => Promise<boolean>;
+  pullFromSupabase: () => Promise<void>;
 
   // Reports & Ledger
   getDailyStockReport: (dateFilter: string) => DailyStockRow[];
@@ -169,76 +176,130 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!supabase) return;
 
       if (changedIngredients && changedIngredients.length > 0) {
-        await supabase.from('ingredients').upsert(changedIngredients);
+        const { error } = await supabase.from('ingredients').upsert(changedIngredients);
+        if (error) console.error('Supabase ingredients upsert error:', error);
       }
       if (newTrx) {
-        await supabase.from('transactions').upsert([newTrx]);
+        const { error } = await supabase.from('transactions').upsert([newTrx]);
+        if (error) console.error('Supabase transaction upsert error:', error);
       }
       if (newMovements && newMovements.length > 0) {
-        await supabase.from('stock_movements').upsert(newMovements);
+        const { error } = await supabase.from('stock_movements').upsert(newMovements);
+        if (error) console.error('Supabase movements upsert error:', error);
       }
-    } catch (e) {
+      setLastSyncedAt(new Date());
+      setSupabaseError(null);
+    } catch (e: any) {
       console.warn('Supabase sync warning:', e);
+      setSupabaseError(e?.message || 'Gagal tersambung ke Supabase');
     }
   };
 
-  // Auto Fetch & Sync directly from Supabase on mount
-  useEffect(() => {
-    const syncFromSupabase = async () => {
-      try {
-        const supabase = getSupabase();
-        if (!supabase) return;
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [supabaseError, setSupabaseError] = useState<string | null>(null);
 
-        const [
-          { data: sbUnits },
-          { data: sbCategories },
-          { data: sbIngredients },
-          { data: sbMenus },
-          { data: sbRecipes },
-          { data: sbRecipeDetails },
-          { data: sbTransactions },
-          { data: sbStockMovements },
-        ] = await Promise.all([
-          supabase.from('units').select('*'),
-          supabase.from('categories').select('*'),
-          supabase.from('ingredients').select('*').order('code', { ascending: true }),
-          supabase.from('menus').select('*').order('name', { ascending: true }),
-          supabase.from('recipes').select('*'),
-          supabase.from('recipe_details').select('*'),
-          supabase.from('transactions').select('*').order('created_at', { ascending: false }),
-          supabase.from('stock_movements').select('*').order('created_at', { ascending: false }),
-        ]);
+  // Pull data from Supabase
+  const pullFromSupabase = async () => {
+    try {
+      const supabase = getSupabase();
+      if (!supabase) return;
 
-        if (sbIngredients && sbIngredients.length > 0) {
-          setIngredients(sbIngredients);
-        }
-        if (sbUnits && sbUnits.length > 0) {
-          setUnits(sbUnits);
-        }
-        if (sbCategories && sbCategories.length > 0) {
-          setCategories(sbCategories);
-        }
-        if (sbMenus && sbMenus.length > 0) {
-          setMenus(sbMenus);
-        }
-        if (sbRecipes && sbRecipes.length > 0) {
-          setRecipes(sbRecipes);
-        }
-        if (sbRecipeDetails && sbRecipeDetails.length > 0) {
-          setRecipeDetails(sbRecipeDetails);
-        }
-        if (sbTransactions && sbTransactions.length > 0) {
-          setTransactions(sbTransactions);
-        }
-        if (sbStockMovements && sbStockMovements.length > 0) {
-          setStockMovements(sbStockMovements);
-        }
-      } catch (e) {
-        console.log('Supabase auto-sync notice:', e);
+      const [
+        { data: sbUnits },
+        { data: sbCategories },
+        { data: sbIngredients, error: ingErr },
+        { data: sbMenus },
+        { data: sbRecipes },
+        { data: sbRecipeDetails },
+        { data: sbTransactions },
+        { data: sbStockMovements },
+      ] = await Promise.all([
+        supabase.from('units').select('*'),
+        supabase.from('categories').select('*'),
+        supabase.from('ingredients').select('*').order('code', { ascending: true }),
+        supabase.from('menus').select('*').order('name', { ascending: true }),
+        supabase.from('recipes').select('*'),
+        supabase.from('recipe_details').select('*'),
+        supabase.from('transactions').select('*').order('created_at', { ascending: false }),
+        supabase.from('stock_movements').select('*').order('created_at', { ascending: false }),
+      ]);
+
+      if (ingErr) {
+        setSupabaseError(ingErr.message);
+      } else {
+        setSupabaseError(null);
       }
-    };
 
-    syncFromSupabase();
+      if (sbIngredients && sbIngredients.length > 0) {
+        setIngredients(sbIngredients);
+      }
+      if (sbUnits && sbUnits.length > 0) setUnits(sbUnits);
+      if (sbCategories && sbCategories.length > 0) setCategories(sbCategories);
+      if (sbMenus && sbMenus.length > 0) setMenus(sbMenus);
+      if (sbRecipes && sbRecipes.length > 0) setRecipes(sbRecipes);
+      if (sbRecipeDetails && sbRecipeDetails.length > 0) setRecipeDetails(sbRecipeDetails);
+      if (sbTransactions && sbTransactions.length > 0) setTransactions(sbTransactions);
+      if (sbStockMovements && sbStockMovements.length > 0) setStockMovements(sbStockMovements);
+
+      setLastSyncedAt(new Date());
+    } catch (e: any) {
+      console.warn('Supabase auto-sync notice:', e);
+      setSupabaseError(e?.message || 'Koneksi Supabase error');
+    }
+  };
+
+  // Push ALL current data to Supabase (Initial seed or force sync)
+  const pushAllToSupabase = async (): Promise<boolean> => {
+    setIsSyncing(true);
+    setSupabaseError(null);
+    try {
+      const supabase = getSupabase();
+      if (!supabase) {
+        setSupabaseError('Supabase client tidak dikonfigurasi');
+        return false;
+      }
+
+      const results = await Promise.all([
+        supabase.from('units').upsert(units),
+        supabase.from('categories').upsert(categories),
+        supabase.from('suppliers').upsert(suppliers),
+        supabase.from('ingredients').upsert(ingredients),
+        supabase.from('menus').upsert(menus),
+        supabase.from('recipes').upsert(recipes),
+        supabase.from('recipe_details').upsert(recipeDetails),
+        supabase.from('transactions').upsert(transactions),
+        supabase.from('stock_movements').upsert(stockMovements),
+      ]);
+
+      const err = results.find((r) => r.error)?.error;
+      if (err) {
+        console.error('Push all to Supabase error:', err);
+        setSupabaseError(err.message || 'Gagal push data ke Supabase');
+        return false;
+      }
+
+      setLastSyncedAt(new Date());
+      return true;
+    } catch (e: any) {
+      console.error('Push exception:', e);
+      setSupabaseError(e?.message || 'Gagal koneksi Supabase');
+      return false;
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Auto Sync on Mount & Periodic Polling for Multi-Device Consistency
+  useEffect(() => {
+    pullFromSupabase();
+
+    // Poll every 12 seconds to ensure changes on other devices sync automatically
+    const interval = setInterval(() => {
+      pullFromSupabase();
+    }, 12000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Sync to local storage
@@ -711,7 +772,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     date: string,
     ingredientId: string,
     quantity: number,
-    mode: 'plus' | 'minus',
+    mode: 'plus' | 'minus' | 'set',
     reason: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other',
     notes: string
   ) => {
@@ -721,7 +782,26 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const trxId = `trx-adj-${Date.now()}`;
     const refNo = generateRefNo('ADJ');
     const qty = Number(quantity);
-    const newStock = mode === 'plus' ? ing.current_stock + qty : ing.current_stock - qty;
+
+    let newStock = ing.current_stock;
+    let moveQty = qty;
+    let moveType: 'in' | 'out' = 'out';
+
+    if (mode === 'set') {
+      newStock = Math.max(0, qty);
+      const diff = newStock - ing.current_stock;
+      moveType = diff >= 0 ? 'in' : 'out';
+      moveQty = Math.abs(diff);
+    } else if (mode === 'plus') {
+      newStock = ing.current_stock + qty;
+      moveType = 'in';
+      moveQty = qty;
+    } else {
+      newStock = Math.max(0, ing.current_stock - qty);
+      moveType = 'out';
+      moveQty = qty;
+    }
+
     const updatedIng: Ingredient = { ...ing, current_stock: newStock };
 
     const newTrx: Transaction = {
@@ -729,7 +809,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       type: 'adjustment',
       transaction_date: date || new Date().toISOString(),
       reference_no: refNo,
-      notes,
+      notes: notes || `Penyesuaian stok (${reason})`,
       adjustment_reason: reason,
       created_by: currentUser.name,
       created_at: new Date().toISOString(),
@@ -739,10 +819,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       id: `mov-${Date.now()}`,
       transaction_id: trxId,
       ingredient_id: ingredientId,
-      type: mode === 'plus' ? 'in' : 'out',
-      quantity: qty,
+      type: moveType,
+      quantity: moveQty,
       balance_after: newStock,
-      description: `Penyesuaian Stok (${mode === 'plus' ? '+' : '-'}) Alasan: ${reason} - ${notes}`,
+      description: mode === 'set'
+        ? `Stock Opname (Set Langsung): ${ing.current_stock} -> ${newStock} (${notes || reason})`
+        : `Penyesuaian Stok (${moveType === 'in' ? '+' : '-'}) Alasan: ${reason} - ${notes}`,
       created_at: new Date().toISOString(),
     };
 
@@ -896,6 +978,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     return `-- MECAMOCHA INVENTORY SYSTEM - SUPABASE DATABASE MIGRATION SCRIPT
 -- Execute this script in your Supabase SQL Editor
+
+-- Disable RLS to allow direct anonymous REST sync
+ALTER TABLE IF EXISTS public.units DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.categories DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.suppliers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.ingredients DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.menus DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.recipes DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.recipe_details DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.transactions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.stock_movements DISABLE ROW LEVEL SECURITY;
 
 -- 1. Create Units Table
 CREATE TABLE IF NOT EXISTS public.units (
@@ -1090,6 +1183,12 @@ ${recipeDetailInserts ? `INSERT INTO public.recipe_details (id, recipe_id, ingre
         checkProductionSufficiency,
         addProductionTransaction,
         addAdjustmentTransaction,
+
+        isSyncing,
+        lastSyncedAt,
+        supabaseError,
+        pushAllToSupabase,
+        pullFromSupabase,
 
         getDailyStockReport,
         getIngredientLedger,
