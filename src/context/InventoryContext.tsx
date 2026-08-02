@@ -268,17 +268,35 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setSupabaseError(null);
       }
 
-      if (sbIngredients && sbIngredients.length > 0) {
-        setIngredients(sbIngredients);
-      }
       if (sbUnits && sbUnits.length > 0) setUnits(sbUnits);
       if (sbCategories && sbCategories.length > 0) setCategories(sbCategories);
       if (sbMenus && sbMenus.length > 0) setMenus(sbMenus);
       if (sbRecipes && sbRecipes.length > 0) setRecipes(sbRecipes);
       if (sbRecipeDetails && sbRecipeDetails.length > 0) setRecipeDetails(sbRecipeDetails);
       if (sbTransactions && sbTransactions.length > 0) setTransactions(sbTransactions);
+
+      const movementsToUse = (sbStockMovements && sbStockMovements.length > 0) ? sbStockMovements : stockMovements;
       if (sbStockMovements && sbStockMovements.length > 0) setStockMovements(sbStockMovements);
 
+      if (sbIngredients && sbIngredients.length > 0) {
+        const mergedIngredients = sbIngredients.map((ing) => {
+          const ingMovs = movementsToUse.filter(
+            (m) => m.ingredient_id === ing.id || m.ingredient_id === ing.code
+          );
+          if (ingMovs.length > 0) {
+            const sortedMovs = [...ingMovs].sort(
+              (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
+            const latest = sortedMovs[0];
+            if (latest.balance_after !== undefined && latest.balance_after !== null) {
+              return { ...ing, current_stock: Number(latest.balance_after) };
+            }
+          }
+          return { ...ing, current_stock: Number(ing.current_stock) || 0 };
+        });
+
+        setIngredients(mergedIngredients);
+      }
       setLastSyncedAt(new Date());
     } catch (e: any) {
       console.warn('Supabase auto-sync notice:', e);
@@ -918,13 +936,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       // Movements on targetDate
       const movementsToday = stockMovements.filter((m) => {
-        if (m.ingredient_id !== ing.id) return false;
+        if (m.ingredient_id !== ing.id && m.ingredient_id !== ing.code) return false;
         return getYYYYMMDD(m.created_at) === targetDate;
       });
 
       // Movements created AFTER targetDate (future relative to report date)
       const movementsAfter = stockMovements.filter((m) => {
-        if (m.ingredient_id !== ing.id) return false;
+        if (m.ingredient_id !== ing.id && m.ingredient_id !== ing.code) return false;
         return getYYYYMMDD(m.created_at) > targetDate;
       });
 
@@ -992,8 +1010,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const getIngredientLedger = (ingredientId: string): StockMovement[] => {
+    const targetIng = ingredients.find((i) => i.id === ingredientId || i.code === ingredientId);
+    const code = targetIng?.code;
     return stockMovements
-      .filter((m) => m.ingredient_id === ingredientId)
+      .filter((m) => m.ingredient_id === ingredientId || (code && m.ingredient_id === code))
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   };
 
