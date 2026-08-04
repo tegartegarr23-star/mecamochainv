@@ -157,7 +157,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                 : 'bg-stone-50 text-stone-700 hover:bg-stone-100 border border-stone-200'
             }`}
           >
-            <Plus className="w-4 h-4 text-amber-400" /> Produksi Menu
+            <Plus className="w-4 h-4 text-amber-400" /> Produksi / Penjualan Menu
           </button>
           <button
             onClick={() => setActiveTab('prepare')}
@@ -939,7 +939,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                   const typeLabel = {
                     purchase: 'Pembelian',
                     prepare: 'Prepare',
-                    production: 'Produksi Menu',
+                    production: 'Produksi / Penjualan',
                     adjustment: 'Penyesuaian',
                   }[trx.type];
 
@@ -950,6 +950,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                     adjustment: 'bg-purple-100 text-purple-800',
                   }[trx.type];
 
+                  let detailText = trx.notes || '-';
+                  if (trx.type === 'production' && trx.menu_id) {
+                    const menu = menus.find((m) => m.id === trx.menu_id);
+                    detailText = `Penjualan / Produksi ${trx.portion_count || 1} porsi ${menu ? menu.name : 'Menu'} ${trx.notes ? `(${trx.notes})` : ''}`;
+                  } else if (trx.type === 'adjustment' && trx.adjustment_reason) {
+                    detailText = `Penyesuaian (${trx.adjustment_reason}) ${trx.notes ? `- ${trx.notes}` : ''}`;
+                  }
+
                   return (
                     <tr key={trx.id} className="hover:bg-stone-50">
                       <td className="p-3.5 text-stone-600">{formatDate(trx.transaction_date, true)}</td>
@@ -959,7 +967,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                           {typeLabel}
                         </span>
                       </td>
-                      <td className="p-3.5 text-stone-700">{trx.notes || '-'}</td>
+                      <td className="p-3.5 text-stone-700 font-medium">{detailText}</td>
                       <td className="p-3.5 text-stone-600 font-medium">{trx.created_by}</td>
                     </tr>
                   );

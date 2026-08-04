@@ -9,6 +9,7 @@ import {
   Recipe,
   RecipeDetail,
   Transaction,
+  TransactionType,
   StockMovement,
   PurchaseItemInput,
   PrepareItemInput,
@@ -225,7 +226,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           supplier_id: newTrx.supplier_id ? String(newTrx.supplier_id) : null,
           menu_id: newTrx.menu_id ? String(newTrx.menu_id) : null,
           portion_count: newTrx.portion_count !== undefined && newTrx.portion_count !== null ? Number(newTrx.portion_count) : null,
-          total_amount: newTrx.total_amount !== undefined && newTrx.total_amount !== null ? Number(newTrx.total_amount) : null,
           notes: newTrx.notes || null,
           created_by: newTrx.created_by || null,
           adjustment_reason: newTrx.adjustment_reason || null,
@@ -312,50 +312,67 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setSupabaseError(null);
       }
 
-      if (sbUnits && sbUnits.length > 0) setUnits(sbUnits);
-      if (sbCategories && sbCategories.length > 0) setCategories(sbCategories);
-      if (sbSuppliers && sbSuppliers.length > 0) setSuppliers(sbSuppliers);
-      if (sbMenus && sbMenus.length > 0) setMenus(sbMenus);
-      if (sbRecipes && sbRecipes.length > 0) setRecipes(sbRecipes);
-      if (sbRecipeDetails && sbRecipeDetails.length > 0) setRecipeDetails(sbRecipeDetails);
+      if (sbUnits && sbUnits.length > 0) setUnits((prev) => mergeByField(prev, sbUnits, 'id'));
+      if (sbCategories && sbCategories.length > 0) setCategories((prev) => mergeByField(prev, sbCategories, 'id'));
+      if (sbSuppliers && sbSuppliers.length > 0) setSuppliers((prev) => mergeByField(prev, sbSuppliers, 'id'));
+      if (sbMenus && sbMenus.length > 0) setMenus((prev) => mergeByField(prev, sbMenus, 'id'));
+      if (sbRecipes && sbRecipes.length > 0) setRecipes((prev) => mergeByField(prev, sbRecipes, 'id'));
+      if (sbRecipeDetails && sbRecipeDetails.length > 0) setRecipeDetails((prev) => mergeByField(prev, sbRecipeDetails, 'id'));
 
-      if (sbStockMovements) {
-        const cleanMovements = sbStockMovements.map((m) => ({
-          ...m,
-          id: String(m.id),
-          transaction_id: m.transaction_id ? String(m.transaction_id) : undefined,
-          ingredient_id: String(m.ingredient_id),
-          quantity: Number(m.quantity) || 0,
-          balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : undefined,
-          created_at: m.created_at || new Date().toISOString(),
-        }));
-        setStockMovements(cleanMovements);
-      }
+      const cleanMovements = (sbStockMovements || []).map((m) => ({
+        ...m,
+        id: String(m.id),
+        transaction_id: m.transaction_id ? String(m.transaction_id) : undefined,
+        ingredient_id: String(m.ingredient_id),
+        type: String(m.type) as 'in' | 'out',
+        quantity: Number(m.quantity) || 0,
+        balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : undefined,
+        description: m.description || '',
+        created_at: m.created_at || new Date().toISOString(),
+      }));
 
-      if (sbTransactions) {
-        const cleanTransactions = sbTransactions.map((t) => ({
-          ...t,
-          id: String(t.id),
-          type: t.type,
-          transaction_date: t.transaction_date || new Date().toISOString(),
-          reference_no: String(t.reference_no || ''),
-          created_at: t.created_at || new Date().toISOString(),
-        }));
-        setTransactions(cleanTransactions);
-      }
+      const cleanTransactions = (sbTransactions || []).map((t) => ({
+        ...t,
+        id: String(t.id),
+        type: String(t.type) as TransactionType,
+        transaction_date: t.transaction_date || new Date().toISOString(),
+        reference_no: String(t.reference_no || ''),
+        created_at: t.created_at || new Date().toISOString(),
+      }));
 
-      if (sbIngredients && sbIngredients.length > 0) {
-        const cleanIngredients = sbIngredients.map((ing) => ({
-          ...ing,
-          id: String(ing.id),
-          code: String(ing.code || ''),
-          name: String(ing.name || ''),
-          current_stock: Number(ing.current_stock) || 0,
-          min_stock: Number(ing.min_stock) || 0,
-          cost_per_unit: Number(ing.cost_per_unit) || 0,
-        }));
-        setIngredients(cleanIngredients);
-      }
+      const cleanIngredients = (sbIngredients || []).map((ing) => ({
+        ...ing,
+        id: String(ing.id),
+        code: String(ing.code || ''),
+        name: String(ing.name || ''),
+        current_stock: Number(ing.current_stock) || 0,
+        min_stock: Number(ing.min_stock) || 0,
+        cost_per_unit: Number(ing.cost_per_unit) || 0,
+      }));
+
+      // Safely merge transactions so local un-synced transactions are preserved
+      setTransactions((prev) =>
+        mergeByField(prev, cleanTransactions, 'id').sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )
+      );
+
+      // Safely merge stock movements & sync ingredients current_stock live
+      setStockMovements((prev) => {
+        const mergedMovements = mergeByField(prev, cleanMovements, 'id').sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+
+        setIngredients((prevIngs) => {
+          const mergedIngs = mergeByField(prevIngs, cleanIngredients, 'id').map((ing) => ({
+            ...ing,
+            current_stock: getIngredientCurrentStock(ing, mergedMovements),
+          }));
+          return mergedIngs;
+        });
+
+        return mergedMovements;
+      });
 
       setLastSyncedAt(new Date());
     } catch (e: any) {
@@ -793,16 +810,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     notes: string,
     items: PurchaseItemInput[]
   ) => {
-    const trxId = `trx-pur-${Date.now()}`;
+    const now = Date.now();
+    const trxId = `trx-pur-${now}`;
+    const isoDate = date ? new Date(date).toISOString() : new Date(now).toISOString();
     const newTrx: Transaction = {
       id: trxId,
       type: 'purchase',
-      transaction_date: date || new Date().toISOString(),
+      transaction_date: isoDate,
       reference_no: refNo || generateRefNo('PUR'),
       supplier_id: supplierId,
       notes,
       created_by: currentUser.name,
-      created_at: new Date().toISOString(),
+      created_at: new Date(now).toISOString(),
     };
 
     const newMovements: StockMovement[] = [];
@@ -812,7 +831,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const ingIndex = updatedIngredients.findIndex((i) => i.id === item.ingredient_id);
       if (ingIndex !== -1) {
         const currentIng = updatedIngredients[ingIndex];
-        const newStock = currentIng.current_stock + Number(item.quantity);
+        const currentStock = getIngredientCurrentStock(currentIng, stockMovements);
+        const newStock = currentStock + Number(item.quantity);
         updatedIngredients[ingIndex] = {
           ...currentIng,
           current_stock: newStock,
@@ -821,14 +841,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         const supplierName = suppliers.find((s) => s.id === supplierId)?.name || 'Supplier';
         newMovements.push({
-          id: `mov-${Date.now()}-${index}`,
+          id: `mov-${now}-${index}`,
           transaction_id: trxId,
           ingredient_id: item.ingredient_id,
           type: 'in',
           quantity: Number(item.quantity),
           balance_after: newStock,
-          description: `Pembelian dari ${supplierName} (${refNo})`,
-          created_at: new Date().toISOString(),
+          description: `Pembelian dari ${supplierName} (${refNo || 'PO'})`,
+          created_at: new Date(now + index * 10).toISOString(),
         });
       }
     });
@@ -849,15 +869,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     notes: string,
     items: PrepareItemInput[]
   ) => {
-    const trxId = `trx-prep-${Date.now()}`;
+    const now = Date.now();
+    const trxId = `trx-prep-${now}`;
+    const isoDate = date ? new Date(date).toISOString() : new Date(now).toISOString();
     const newTrx: Transaction = {
       id: trxId,
       type: 'prepare',
-      transaction_date: date || new Date().toISOString(),
+      transaction_date: isoDate,
       reference_no: refNo || generateRefNo('PREP'),
       notes,
       created_by: currentUser.name,
-      created_at: new Date().toISOString(),
+      created_at: new Date(now).toISOString(),
     };
 
     const newMovements: StockMovement[] = [];
@@ -868,29 +890,30 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (ingIndex !== -1) {
         const currentIng = updatedIngredients[ingIndex];
         const qty = Number(item.quantity);
+        const currentStock = getIngredientCurrentStock(currentIng, stockMovements);
 
-        let newStock = currentIng.current_stock;
+        let newStock = currentStock;
         if (item.is_target) {
           // Prepared target (In)
-          newStock += qty;
+          newStock = currentStock + qty;
         } else {
           // Source raw ingredient (Out)
-          newStock -= qty;
+          newStock = Math.max(0, currentStock - qty);
         }
 
         updatedIngredients[ingIndex] = { ...currentIng, current_stock: newStock };
 
         newMovements.push({
-          id: `mov-${Date.now()}-${index}`,
+          id: `mov-${now}-${index}`,
           transaction_id: trxId,
           ingredient_id: item.ingredient_id,
           type: item.is_target ? 'in' : 'out',
           quantity: qty,
           balance_after: newStock,
           description: item.is_target
-            ? `Hasil Proses Prepare / Konversi (${refNo})`
-            : `Pemakaian Bahan Mentah untuk Prepare (${refNo})`,
-          created_at: new Date().toISOString(),
+            ? `Hasil Proses Prepare / Konversi (${refNo || 'PREP'})`
+            : `Pemakaian Bahan Mentah untuk Prepare (${refNo || 'PREP'})`,
+          created_at: new Date(now + index * 10).toISOString(),
         });
       }
     });
@@ -913,7 +936,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const ing = ingredients.find((i) => i.id === d.ingredient_id);
       const unit = units.find((u) => u.id === ing?.unit_id);
       const requiredQty = (d.quantity || 0) * portionCount;
-      const currentStock = ing ? ing.current_stock : 0;
+      const currentStock = ing ? getIngredientCurrentStock(ing, stockMovements) : 0;
       const isShortage = currentStock < requiredQty;
 
       if (isShortage) {
@@ -921,7 +944,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       return {
-        ingredient: ing || ({ name: 'Unknown Ingredient', code: 'N/A', current_stock: 0 } as Ingredient),
+        ingredient: ing
+          ? { ...ing, current_stock: currentStock }
+          : ({ name: 'Unknown Ingredient', code: 'N/A', current_stock: 0 } as Ingredient),
         unit,
         requiredQty,
         currentStock,
@@ -948,17 +973,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return { success: false, message: 'Resep untuk menu ini belum dikonfigurasi' };
     }
 
-    const trxId = `trx-prod-${Date.now()}`;
+    const now = Date.now();
+    const trxId = `trx-prod-${now}`;
+    const isoDate = date ? new Date(date).toISOString() : new Date(now).toISOString();
     const newTrx: Transaction = {
       id: trxId,
       type: 'production',
-      transaction_date: date || new Date().toISOString(),
+      transaction_date: isoDate,
       reference_no: refNo || generateRefNo('PROD'),
       menu_id: menuId,
       portion_count: portionCount,
       notes,
       created_by: currentUser.name,
-      created_at: new Date().toISOString(),
+      created_at: new Date(now).toISOString(),
     };
 
     const newMovements: StockMovement[] = [];
@@ -968,18 +995,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const ingIndex = updatedIngredients.findIndex((i) => i.id === item.ingredient.id);
       if (ingIndex !== -1) {
         const currentIng = updatedIngredients[ingIndex];
-        const newStock = currentIng.current_stock - item.requiredQty;
+        const currentStock = getIngredientCurrentStock(currentIng, stockMovements);
+        const newStock = Math.max(0, currentStock - item.requiredQty);
         updatedIngredients[ingIndex] = { ...currentIng, current_stock: newStock };
 
         newMovements.push({
-          id: `mov-${Date.now()}-${index}`,
+          id: `mov-${now}-${index}`,
           transaction_id: trxId,
           ingredient_id: item.ingredient.id,
           type: 'out',
           quantity: item.requiredQty,
           balance_after: newStock,
-          description: `Produksi ${portionCount} porsi menu ${menu.name} (${refNo})`,
-          created_at: new Date().toISOString(),
+          description: `Produksi / Penjualan ${portionCount} porsi ${menu.name} (${refNo || 'PROD'})`,
+          created_at: new Date(now + index * 10).toISOString(),
         });
       }
     });
@@ -995,7 +1023,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     return {
       success: true,
-      message: `Berhasil mencatat produksi ${portionCount} porsi ${menu.name}. Stok bahan telah terpotong otomatis.`,
+      message: `Berhasil mencatat produksi/penjualan ${portionCount} porsi ${menu.name}. Stok bahan telah terpotong otomatis.`,
     };
   };
 
@@ -1034,7 +1062,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const ing = ingredients.find((i) => i.id === ingredientId || i.code === ingredientId);
     if (!ing) return;
 
-    const trxId = `trx-adj-${Date.now()}`;
+    const now = Date.now();
+    const trxId = `trx-adj-${now}`;
     const refNo = generateRefNo('ADJ');
     const qty = Number(quantity);
 
@@ -1061,19 +1090,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const updatedIng: Ingredient = { ...ing, current_stock: newStock };
 
+    const isoDate = date ? new Date(date).toISOString() : new Date(now).toISOString();
     const newTrx: Transaction = {
       id: trxId,
       type: 'adjustment',
-      transaction_date: date || new Date().toISOString(),
+      transaction_date: isoDate,
       reference_no: refNo,
       notes: notes || `Penyesuaian stok (${reason})`,
       adjustment_reason: reason,
       created_by: currentUser.name,
-      created_at: new Date().toISOString(),
+      created_at: new Date(now).toISOString(),
     };
 
     const newMov: StockMovement = {
-      id: `mov-${Date.now()}`,
+      id: `mov-${now}`,
       transaction_id: trxId,
       ingredient_id: ing.id,
       type: moveType,
@@ -1082,7 +1112,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       description: mode === 'set'
         ? `Stock Opname (Set Langsung): ${currentStock} -> ${newStock} (${notes || reason})`
         : `Penyesuaian Stok (${moveType === 'in' ? '+' : '-'}) Alasan: ${reason} - ${notes}`,
-      created_at: new Date().toISOString(),
+      created_at: new Date(now).toISOString(),
     };
 
     setIngredients((prev) =>
@@ -1099,8 +1129,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     // Standardize filter date to local YYYY-MM-DD
     const getYYYYMMDD = (input: string | Date): string => {
       if (!input) return new Date().toISOString().slice(0, 10);
-      if (typeof input === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input)) {
-        return input;
+      if (typeof input === 'string') {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
+        return input.slice(0, 10);
       }
       const d = new Date(input);
       if (isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
@@ -1125,7 +1156,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const ingId = String(ing.id).trim().toLowerCase();
         const ingCode = String(ing.code || '').trim().toLowerCase();
         if (mId !== ingId && mId !== ingCode) return false;
-        return getYYYYMMDD(m.created_at) === targetDate;
+
+        const trx = transactions.find((t) => t.id === m.transaction_id);
+        const mDate = getYYYYMMDD(trx?.transaction_date || m.created_at);
+        return mDate === targetDate;
       });
 
       // Movements created AFTER targetDate (future relative to report date)
@@ -1135,7 +1169,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const ingId = String(ing.id).trim().toLowerCase();
         const ingCode = String(ing.code || '').trim().toLowerCase();
         if (mId !== ingId && mId !== ingCode) return false;
-        return getYYYYMMDD(m.created_at) > targetDate;
+
+        const trx = transactions.find((t) => t.id === m.transaction_id);
+        const mDate = getYYYYMMDD(trx?.transaction_date || m.created_at);
+        return mDate > targetDate;
       });
 
       let in_purchase = 0;
@@ -1148,20 +1185,22 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       movementsToday.forEach((m) => {
         const trx = transactions.find((t) => t.id === m.transaction_id);
         const descLower = m.description ? m.description.toLowerCase() : '';
+        const isPurchase = trx?.type === 'purchase' || descLower.includes('pembelian') || descLower.includes('beli');
+        const isPrepare = trx?.type === 'prepare' || descLower.includes('prepare') || descLower.includes('konversi');
+        const isProduction = trx?.type === 'production' || descLower.includes('produksi') || descLower.includes('porsi');
         const isAdj = trx?.type === 'adjustment' || descLower.includes('penyesuaian') || descLower.includes('opname');
 
-        if (trx?.type === 'purchase') {
+        if (isPurchase) {
           if (m.type === 'in') in_purchase += Number(m.quantity) || 0;
-        } else if (trx?.type === 'prepare') {
+        } else if (isPrepare) {
           if (m.type === 'in') in_prepare += Number(m.quantity) || 0;
           if (m.type === 'out') out_prepare += Number(m.quantity) || 0;
-        } else if (trx?.type === 'production') {
+        } else if (isProduction) {
           if (m.type === 'out') out_production += Number(m.quantity) || 0;
         } else if (isAdj) {
           if (m.type === 'in') in_adjustment += Number(m.quantity) || 0;
           if (m.type === 'out') out_adjustment += Number(m.quantity) || 0;
         } else {
-          // Fallback if transaction type is missing
           if (m.type === 'in') in_adjustment += Number(m.quantity) || 0;
           if (m.type === 'out') out_adjustment += Number(m.quantity) || 0;
         }
