@@ -383,16 +383,22 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       // Safely merge transactions so local un-synced transactions are preserved
       setTransactions((prev) =>
-        mergeByField(prev, cleanTransactions, 'id').sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        )
+        mergeByField(prev, cleanTransactions, 'id').sort((a, b) => {
+          const timeA = new Date(a.created_at).getTime() || 0;
+          const timeB = new Date(b.created_at).getTime() || 0;
+          if (timeB !== timeA) return timeB - timeA;
+          return String(b.id).localeCompare(String(a.id));
+        })
       );
 
       // Safely merge stock movements & sync ingredients current_stock live
       setStockMovements((prev) => {
-        const mergedMovements = mergeByField(prev, cleanMovements, 'id').sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
+        const mergedMovements = mergeByField(prev, cleanMovements, 'id').sort((a, b) => {
+          const timeA = new Date(a.created_at).getTime() || 0;
+          const timeB = new Date(b.created_at).getTime() || 0;
+          if (timeB !== timeA) return timeB - timeA;
+          return String(b.id).localeCompare(String(a.id));
+        });
 
         setIngredients((prevIngs) => {
           const mergedIngs = mergeByField(prevIngs, cleanIngredients, 'id').map((ing) => ({
@@ -1092,11 +1098,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     });
 
     if (ingMovs.length > 0) {
-      const sortedMovs = [...ingMovs].sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
+      const sortedMovs = [...ingMovs].sort((a, b) => {
+        const timeA = new Date(a.created_at).getTime() || 0;
+        const timeB = new Date(b.created_at).getTime() || 0;
+        if (timeB !== timeA) return timeB - timeA;
+        return String(b.id).localeCompare(String(a.id));
+      });
       const latest = sortedMovs[0];
-      if (latest && latest.balance_after !== undefined && latest.balance_after !== null) {
+      if (latest && latest.balance_after !== undefined && latest.balance_after !== null && !isNaN(Number(latest.balance_after))) {
         return Number(latest.balance_after);
       }
     }
@@ -1182,17 +1191,30 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Daily Stock Report Generator
   const getDailyStockReport = (dateFilter: string): DailyStockRow[] => {
     // Standardize filter date to local YYYY-MM-DD
-    const getYYYYMMDD = (input: string | Date): string => {
+    const getYYYYMMDD = (input: string | Date | undefined | null): string => {
       if (!input) return new Date().toISOString().slice(0, 10);
       if (typeof input === 'string') {
         const trimmed = input.trim();
-        const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
-        if (match) return match[1];
+        const matchIso = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+        if (matchIso) {
+          const y = matchIso[1];
+          const m = matchIso[2].padStart(2, '0');
+          const d = matchIso[3].padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        }
+        const matchId = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+        if (matchId) {
+          const d = matchId[1].padStart(2, '0');
+          const m = matchId[2].padStart(2, '0');
+          const y = matchId[3];
+          return `${y}-${m}-${d}`;
+        }
       }
-      if (input instanceof Date && !isNaN(input.getTime())) {
-        const y = input.getFullYear();
-        const m = String(input.getMonth() + 1).padStart(2, '0');
-        const day = String(input.getDate()).padStart(2, '0');
+      const d = new Date(input);
+      if (!isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
         return `${y}-${m}-${day}`;
       }
       return new Date().toISOString().slice(0, 10);
@@ -1214,7 +1236,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const ingCode = String(ing.code || '').trim().toLowerCase();
         if (mId !== ingId && mId !== ingCode) return false;
 
-        const trx = transactions.find((t) => t.id === m.transaction_id);
+        const trx = transactions.find(
+          (t) => t.id === m.transaction_id || (t.reference_no && m.description && m.description.includes(t.reference_no))
+        );
         const mDate = getYYYYMMDD(trx?.transaction_date || m.created_at);
         return mDate === targetDate;
       });
@@ -1227,7 +1251,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const ingCode = String(ing.code || '').trim().toLowerCase();
         if (mId !== ingId && mId !== ingCode) return false;
 
-        const trx = transactions.find((t) => t.id === m.transaction_id);
+        const trx = transactions.find(
+          (t) => t.id === m.transaction_id || (t.reference_no && m.description && m.description.includes(t.reference_no))
+        );
         const mDate = getYYYYMMDD(trx?.transaction_date || m.created_at);
         return mDate > targetDate;
       });
@@ -1240,12 +1266,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       let out_adjustment = 0;
 
       movementsToday.forEach((m) => {
-        const trx = transactions.find((t) => t.id === m.transaction_id);
+        const trx = transactions.find(
+          (t) => t.id === m.transaction_id || (t.reference_no && m.description && m.description.includes(t.reference_no))
+        );
         const descLower = m.description ? m.description.toLowerCase() : '';
-        const isPurchase = trx?.type === 'purchase' || descLower.includes('pembelian') || descLower.includes('beli');
-        const isPrepare = trx?.type === 'prepare' || descLower.includes('prepare') || descLower.includes('konversi');
-        const isProduction = trx?.type === 'production' || descLower.includes('produksi') || descLower.includes('porsi');
-        const isAdj = trx?.type === 'adjustment' || descLower.includes('penyesuaian') || descLower.includes('opname');
+        const trxType = trx?.type ? String(trx.type).toLowerCase() : '';
+
+        const isPurchase = trxType === 'purchase' || descLower.includes('pembelian') || descLower.includes('beli') || descLower.includes('pur');
+        const isPrepare = trxType === 'prepare' || descLower.includes('prepare') || descLower.includes('konversi') || descLower.includes('prep');
+        const isProduction = trxType === 'production' || descLower.includes('produksi') || descLower.includes('porsi') || descLower.includes('prod');
+        const isAdj = trxType === 'adjustment' || descLower.includes('penyesuaian') || descLower.includes('opname') || descLower.includes('init') || descLower.includes('adj');
 
         if (isPurchase) {
           if (m.type === 'in') in_purchase += Number(m.quantity) || 0;
