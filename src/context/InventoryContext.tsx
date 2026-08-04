@@ -135,7 +135,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const item = localStorage.getItem(key);
       if (!item) return fallback;
       const parsed = JSON.parse(item);
-      // Fallback if legacy ingredients list with < 10 items (RAW-001 demo)
+      // Fallback if empty array for core transactions/movements/ingredients
+      if (Array.isArray(parsed) && parsed.length === 0 && Array.isArray(fallback) && fallback.length > 0) {
+        return fallback;
+      }
+      // Fallback if legacy ingredients list with < 50 items
       if (key === STORAGE_KEYS.INGREDIENTS && Array.isArray(parsed) && parsed.length < 50) {
         return fallback;
       }
@@ -182,11 +186,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const syncDataToSupabase = async (
     changedIngredients?: Ingredient[],
     newTrx?: Transaction,
-    newMovements?: StockMovement[]
+    newMovements?: StockMovement[],
+    overrideAllTrxs?: Transaction[],
+    overrideAllMovs?: StockMovement[]
   ) => {
     try {
       const supabase = getSupabase();
       if (!supabase) return;
+
+      let syncErr: string | null = null;
 
       // 1. Sync ingredients
       if (changedIngredients && changedIngredients.length > 0) {
@@ -194,8 +202,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           id: String(ing.id),
           code: String(ing.code || ''),
           name: String(ing.name || ''),
-          category_id: ing.category_id ? String(ing.category_id) : null,
-          unit_id: ing.unit_id ? String(ing.unit_id) : null,
+          category_id: ing.category_id && categories.some((c) => c.id === ing.category_id) ? String(ing.category_id) : null,
+          unit_id: ing.unit_id && units.some((u) => u.id === ing.unit_id) ? String(ing.unit_id) : null,
           type: ing.type || 'raw',
           min_stock: Number(ing.min_stock) || 0,
           current_stock: Number(ing.current_stock) || 0,
@@ -206,7 +214,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const { error: ingErr } = await supabase.from('ingredients').upsert(cleanIngredients);
         if (ingErr) {
           console.error('Supabase ingredients upsert error:', ingErr);
-          setSupabaseError(`Gagal sync bahan: ${ingErr.message}`);
+          syncErr = `Gagal sync bahan: ${ingErr.message}`;
         } else {
           for (const cleanIng of cleanIngredients) {
             await supabase
@@ -218,36 +226,40 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       // 2. Sync transactions (include newTrx and all existing transactions)
-      const allTrxs = newTrx
+      const allTrxs = overrideAllTrxs || (newTrx
         ? [newTrx, ...transactions.filter((t) => t.id !== newTrx.id)]
-        : transactions;
+        : transactions);
 
       if (allTrxs.length > 0) {
-        const cleanTrxs = allTrxs.map((t) => ({
-          id: String(t.id),
-          type: String(t.type),
-          transaction_date: t.transaction_date || new Date().toISOString(),
-          reference_no: String(t.reference_no || ''),
-          supplier_id: t.supplier_id ? String(t.supplier_id) : null,
-          menu_id: t.menu_id ? String(t.menu_id) : null,
-          portion_count: t.portion_count !== undefined && t.portion_count !== null ? Number(t.portion_count) : null,
-          notes: t.notes || null,
-          created_by: t.created_by || null,
-          adjustment_reason: t.adjustment_reason || null,
-          created_at: t.created_at || new Date().toISOString(),
-        }));
+        const cleanTrxs = allTrxs.map((t) => {
+          const validSupplier = t.supplier_id && suppliers.some((s) => s.id === t.supplier_id);
+          const validMenu = t.menu_id && menus.some((m) => m.id === t.menu_id);
+          return {
+            id: String(t.id),
+            type: String(t.type),
+            transaction_date: t.transaction_date || new Date().toISOString(),
+            reference_no: String(t.reference_no || ''),
+            supplier_id: validSupplier ? String(t.supplier_id) : null,
+            menu_id: validMenu ? String(t.menu_id) : null,
+            portion_count: t.portion_count !== undefined && t.portion_count !== null ? Number(t.portion_count) : null,
+            notes: t.notes || null,
+            created_by: t.created_by || null,
+            adjustment_reason: t.adjustment_reason || null,
+            created_at: t.created_at || new Date().toISOString(),
+          };
+        });
 
         const { error: trxErr } = await supabase.from('transactions').upsert(cleanTrxs);
         if (trxErr) {
           console.error('Supabase transaction upsert error:', trxErr);
-          setSupabaseError(`Gagal sync transaksi: ${trxErr.message}`);
+          syncErr = `Gagal sync transaksi: ${trxErr.message}`;
         }
       }
 
       // 3. Sync stock movements (include newMovements and all existing movements)
-      const allMovs = newMovements && newMovements.length > 0
+      const allMovs = overrideAllMovs || (newMovements && newMovements.length > 0
         ? [...newMovements, ...stockMovements.filter((m) => !newMovements.some((nm) => nm.id === m.id))]
-        : stockMovements;
+        : stockMovements);
 
       if (allMovs.length > 0) {
         const cleanMovements = allMovs.map((m) => {
@@ -256,10 +268,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               i.id === m.ingredient_id ||
               String(i.code).toLowerCase() === String(m.ingredient_id).toLowerCase()
           );
+          const ingId = foundIng ? String(foundIng.id) : String(m.ingredient_id);
+          const validTrx = m.transaction_id && allTrxs.some((t) => t.id === m.transaction_id);
+
           return {
             id: String(m.id),
-            transaction_id: m.transaction_id ? String(m.transaction_id) : null,
-            ingredient_id: foundIng ? String(foundIng.id) : String(m.ingredient_id),
+            transaction_id: validTrx ? String(m.transaction_id) : null,
+            ingredient_id: ingId,
             type: String(m.type),
             quantity: Number(m.quantity) || 0,
             balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : null,
@@ -271,12 +286,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const { error: movErr } = await supabase.from('stock_movements').upsert(cleanMovements);
         if (movErr) {
           console.error('Supabase movements upsert error:', movErr);
-          setSupabaseError(`Gagal sync mutasi: ${movErr.message}`);
+          syncErr = `Gagal sync mutasi: ${movErr.message}`;
         }
       }
 
-      setLastSyncedAt(new Date());
-      setSupabaseError(null);
+      if (syncErr) {
+        setSupabaseError(syncErr);
+      } else {
+        setLastSyncedAt(new Date());
+        setSupabaseError(null);
+      }
     } catch (e: any) {
       console.warn('Supabase sync warning:', e);
       setSupabaseError(e?.message || 'Gagal tersambung ke Supabase');
@@ -347,6 +366,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         type: String(t.type) as TransactionType,
         transaction_date: t.transaction_date || new Date().toISOString(),
         reference_no: String(t.reference_no || ''),
+        notes: t.notes || '',
+        created_by: t.created_by || '',
         created_at: t.created_at || new Date().toISOString(),
       }));
 
@@ -384,7 +405,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return mergedMovements;
       });
 
-      setLastSyncedAt(new Date());
+      // Automatically push all data to Supabase if Supabase transactions are empty
+      if (!sbTransactions || sbTransactions.length === 0) {
+        pushAllToSupabase();
+      } else {
+        setLastSyncedAt(new Date());
+      }
     } catch (e: any) {
       console.warn('Supabase auto-sync notice:', e);
       setSupabaseError(e?.message || 'Koneksi Supabase error');
@@ -870,14 +896,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     });
 
+    const nextTrxs = [newTrx, ...transactions];
+    const nextMovs = [...newMovements, ...stockMovements];
+
     setIngredients(updatedIngredients);
-    setTransactions((prev) => [newTrx, ...prev]);
-    setStockMovements((prev) => [...newMovements, ...prev]);
+    setTransactions(nextTrxs);
+    setStockMovements(nextMovs);
 
     const changedIngs = updatedIngredients.filter((ing) =>
       items.some((item) => item.ingredient_id === ing.id)
     );
-    syncDataToSupabase(changedIngs, newTrx, newMovements);
+    syncDataToSupabase(changedIngs, newTrx, newMovements, nextTrxs, nextMovs);
   };
 
   const addPrepareTransaction = (
@@ -935,14 +964,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     });
 
+    const nextTrxs = [newTrx, ...transactions];
+    const nextMovs = [...newMovements, ...stockMovements];
+
     setIngredients(updatedIngredients);
-    setTransactions((prev) => [newTrx, ...prev]);
-    setStockMovements((prev) => [...newMovements, ...prev]);
+    setTransactions(nextTrxs);
+    setStockMovements(nextMovs);
 
     const changedIngs = updatedIngredients.filter((ing) =>
       items.some((item) => item.ingredient_id === ing.id)
     );
-    syncDataToSupabase(changedIngs, newTrx, newMovements);
+    syncDataToSupabase(changedIngs, newTrx, newMovements, nextTrxs, nextMovs);
   };
 
   const checkProductionSufficiency = (menuId: string, portionCount: number): ProductionSufficiencyResult => {
@@ -1029,14 +1061,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     });
 
+    const nextTrxs = [newTrx, ...transactions];
+    const nextMovs = [...newMovements, ...stockMovements];
+
     setIngredients(updatedIngredients);
-    setTransactions((prev) => [newTrx, ...prev]);
-    setStockMovements((prev) => [...newMovements, ...prev]);
+    setTransactions(nextTrxs);
+    setStockMovements(nextMovs);
 
     const changedIngs = updatedIngredients.filter((ing) =>
       sufficiency.items.some((item) => item.ingredient.id === ing.id)
     );
-    syncDataToSupabase(changedIngs, newTrx, newMovements);
+    syncDataToSupabase(changedIngs, newTrx, newMovements, nextTrxs, nextMovs);
 
     return {
       success: true,
@@ -1132,13 +1167,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       created_at: new Date(now).toISOString(),
     };
 
+    const nextTrxs = [newTrx, ...transactions];
+    const nextMovs = [newMov, ...stockMovements];
+
     setIngredients((prev) =>
       prev.map((i) => (i.id === ing.id ? updatedIng : i))
     );
-    setTransactions((prev) => [newTrx, ...prev]);
-    setStockMovements((prev) => [newMov, ...prev]);
+    setTransactions(nextTrxs);
+    setStockMovements(nextMovs);
 
-    syncDataToSupabase([updatedIng], newTrx, [newMov]);
+    syncDataToSupabase([updatedIng], newTrx, [newMov], nextTrxs, nextMovs);
   };
 
   // Daily Stock Report Generator
