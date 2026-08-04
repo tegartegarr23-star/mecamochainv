@@ -479,7 +479,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           .eq('id', ing.id);
       }
 
-      // Step 4: Push transactions and stock movements
+      // Step 4: Push transactions and stock movements sequentially
       const cleanTrxs = transactions.map((t) => ({
         id: String(t.id),
         type: String(t.type),
@@ -488,7 +488,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         supplier_id: t.supplier_id ? String(t.supplier_id) : null,
         menu_id: t.menu_id ? String(t.menu_id) : null,
         portion_count: t.portion_count !== undefined && t.portion_count !== null ? Number(t.portion_count) : null,
-        total_amount: t.total_amount !== undefined && t.total_amount !== null ? Number(t.total_amount) : null,
         notes: t.notes || null,
         created_by: t.created_by || null,
         adjustment_reason: t.adjustment_reason || null,
@@ -513,16 +512,24 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         };
       });
 
-      const txResults = await Promise.all([
-        supabase.from('transactions').upsert(cleanTrxs),
-        supabase.from('stock_movements').upsert(cleanMovs),
-      ]);
-      const txErr = txResults.find((r) => r.error)?.error;
-      if (txErr) {
-        console.warn('Push transactions warning:', txErr);
-        const isRls = txErr.message?.toLowerCase().includes('security') || txErr.message?.toLowerCase().includes('policy') || txErr.code === '42501';
-        setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS). Klik "Fix Supabase" di kanan atas.' : (txErr.message || 'Gagal push transaksi/mutasi'));
-        return false;
+      if (cleanTrxs.length > 0) {
+        const { error: trxErr } = await supabase.from('transactions').upsert(cleanTrxs);
+        if (trxErr) {
+          console.warn('Push transactions warning:', trxErr);
+          const isRls = trxErr.message?.toLowerCase().includes('security') || trxErr.message?.toLowerCase().includes('policy') || trxErr.code === '42501';
+          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS). Klik "Fix Supabase" di kanan atas.' : (trxErr.message || 'Gagal push transaksi'));
+          return false;
+        }
+      }
+
+      if (cleanMovs.length > 0) {
+        const { error: movErr } = await supabase.from('stock_movements').upsert(cleanMovs);
+        if (movErr) {
+          console.warn('Push stock movements warning:', movErr);
+          const isRls = movErr.message?.toLowerCase().includes('security') || movErr.message?.toLowerCase().includes('policy') || movErr.code === '42501';
+          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS). Klik "Fix Supabase" di kanan atas.' : (movErr.message || 'Gagal push mutasi stok'));
+          return false;
+        }
       }
 
       setLastSyncedAt(new Date());
