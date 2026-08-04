@@ -463,8 +463,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         id: String(ing.id),
         code: String(ing.code || ''),
         name: String(ing.name || ''),
-        category_id: ing.category_id ? String(ing.category_id) : null,
-        unit_id: ing.unit_id ? String(ing.unit_id) : null,
+        category_id: ing.category_id && categories.some((c) => c.id === ing.category_id) ? String(ing.category_id) : null,
+        unit_id: ing.unit_id && units.some((u) => u.id === ing.unit_id) ? String(ing.unit_id) : null,
         type: ing.type || 'raw',
         min_stock: Number(ing.min_stock) || 0,
         current_stock: getIngredientCurrentStock(ing, stockMovements),
@@ -472,32 +472,37 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         cost_per_unit: Number(ing.cost_per_unit) || 0,
       }));
 
-      const cleanMenus = menus.map((m) => ({
-        id: String(m.id),
-        name: String(m.name),
-        category_id: m.category_id ? String(m.category_id) : null,
-        price: Number(m.price) || 0,
-        cost_price: Number(m.cost_price) || 0,
-        is_active: m.is_active ?? true,
-        active_recipe_version: Number(m.active_recipe_version) || 1,
-        image_url: m.image_url || null,
-      }));
+      const cleanMenus = menus.map((m) => {
+        const catObj = categories.find((c) => c.id === m.category_id);
+        const catName = m.category || catObj?.name || 'Umum';
+        return {
+          id: String(m.id),
+          name: String(m.name),
+          category: String(catName),
+          price: Number(m.price) || 0,
+          is_active: m.is_active ?? true,
+        };
+      });
 
-      const cleanRecipes = recipes.map((r) => ({
-        id: String(r.id),
-        menu_id: String(r.menu_id),
-        version: Number(r.version) || 1,
-        is_active: r.is_active ?? true,
-        notes: r.notes || null,
-        created_at: r.created_at || new Date().toISOString(),
-      }));
+      const cleanRecipes = recipes
+        .filter((r) => menus.some((m) => m.id === r.menu_id))
+        .map((r) => ({
+          id: String(r.id),
+          menu_id: String(r.menu_id),
+          version: Number(r.version) || 1,
+          is_active: r.is_active ?? true,
+          notes: r.notes || null,
+          created_at: r.created_at || new Date().toISOString(),
+        }));
 
-      const cleanRecipeDetails = recipeDetails.map((rd) => ({
-        id: String(rd.id),
-        recipe_id: String(rd.recipe_id),
-        ingredient_id: String(rd.ingredient_id),
-        quantity: Number(rd.quantity) || 0,
-      }));
+      const cleanRecipeDetails = recipeDetails
+        .filter((rd) => ingredients.some((i) => i.id === rd.ingredient_id))
+        .map((rd) => ({
+          id: String(rd.id),
+          recipe_id: String(rd.recipe_id),
+          ingredient_id: String(rd.ingredient_id),
+          quantity: Number(rd.quantity) || 0,
+        }));
 
       const mainResults = await Promise.all([
         supabase.from('ingredients').upsert(cleanIngs),
@@ -522,19 +527,23 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       // Step 4: Push transactions and stock movements sequentially
-      const cleanTrxs = transactions.map((t) => ({
-        id: String(t.id),
-        type: String(t.type),
-        transaction_date: t.transaction_date || new Date().toISOString(),
-        reference_no: String(t.reference_no || ''),
-        supplier_id: t.supplier_id ? String(t.supplier_id) : null,
-        menu_id: t.menu_id ? String(t.menu_id) : null,
-        portion_count: t.portion_count !== undefined && t.portion_count !== null ? Number(t.portion_count) : null,
-        notes: t.notes || null,
-        created_by: t.created_by || null,
-        adjustment_reason: t.adjustment_reason || null,
-        created_at: t.created_at || new Date().toISOString(),
-      }));
+      const cleanTrxs = transactions.map((t) => {
+        const validSupplier = t.supplier_id && suppliers.some((s) => s.id === t.supplier_id);
+        const validMenu = t.menu_id && menus.some((m) => m.id === t.menu_id);
+        return {
+          id: String(t.id),
+          type: String(t.type),
+          transaction_date: t.transaction_date || new Date().toISOString(),
+          reference_no: String(t.reference_no || ''),
+          supplier_id: validSupplier ? String(t.supplier_id) : null,
+          menu_id: validMenu ? String(t.menu_id) : null,
+          portion_count: t.portion_count !== undefined && t.portion_count !== null ? Number(t.portion_count) : null,
+          notes: t.notes || null,
+          created_by: t.created_by || null,
+          adjustment_reason: t.adjustment_reason || null,
+          created_at: t.created_at || new Date().toISOString(),
+        };
+      });
 
       const cleanMovs = stockMovements.map((m) => {
         const foundIng = ingredients.find(
@@ -542,10 +551,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             i.id === m.ingredient_id ||
             String(i.code).toLowerCase() === String(m.ingredient_id).toLowerCase()
         );
+        const ingId = foundIng ? String(foundIng.id) : String(m.ingredient_id);
+        const validTrx = m.transaction_id && transactions.some((t) => t.id === m.transaction_id);
+
         return {
           id: String(m.id),
-          transaction_id: m.transaction_id ? String(m.transaction_id) : null,
-          ingredient_id: foundIng ? String(foundIng.id) : String(m.ingredient_id),
+          transaction_id: validTrx ? String(m.transaction_id) : null,
+          ingredient_id: ingId,
           type: String(m.type),
           quantity: Number(m.quantity) || 0,
           balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : null,
