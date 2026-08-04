@@ -188,6 +188,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const supabase = getSupabase();
       if (!supabase) return;
 
+      // 1. Sync ingredients
       if (changedIngredients && changedIngredients.length > 0) {
         const cleanIngredients = changedIngredients.map((ing) => ({
           id: String(ing.id),
@@ -207,7 +208,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           console.error('Supabase ingredients upsert error:', ingErr);
           setSupabaseError(`Gagal sync bahan: ${ingErr.message}`);
         } else {
-          // Explicitly update current_stock in Supabase table
           for (const cleanIng of cleanIngredients) {
             await supabase
               .from('ingredients')
@@ -217,30 +217,40 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       }
 
-      if (newTrx) {
-        const cleanTrx = {
-          id: String(newTrx.id),
-          type: String(newTrx.type),
-          transaction_date: newTrx.transaction_date || new Date().toISOString(),
-          reference_no: String(newTrx.reference_no || ''),
-          supplier_id: newTrx.supplier_id ? String(newTrx.supplier_id) : null,
-          menu_id: newTrx.menu_id ? String(newTrx.menu_id) : null,
-          portion_count: newTrx.portion_count !== undefined && newTrx.portion_count !== null ? Number(newTrx.portion_count) : null,
-          notes: newTrx.notes || null,
-          created_by: newTrx.created_by || null,
-          adjustment_reason: newTrx.adjustment_reason || null,
-          created_at: newTrx.created_at || new Date().toISOString(),
-        };
+      // 2. Sync transactions (include newTrx and all existing transactions)
+      const allTrxs = newTrx
+        ? [newTrx, ...transactions.filter((t) => t.id !== newTrx.id)]
+        : transactions;
 
-        const { error: trxErr } = await supabase.from('transactions').upsert([cleanTrx]);
+      if (allTrxs.length > 0) {
+        const cleanTrxs = allTrxs.map((t) => ({
+          id: String(t.id),
+          type: String(t.type),
+          transaction_date: t.transaction_date || new Date().toISOString(),
+          reference_no: String(t.reference_no || ''),
+          supplier_id: t.supplier_id ? String(t.supplier_id) : null,
+          menu_id: t.menu_id ? String(t.menu_id) : null,
+          portion_count: t.portion_count !== undefined && t.portion_count !== null ? Number(t.portion_count) : null,
+          notes: t.notes || null,
+          created_by: t.created_by || null,
+          adjustment_reason: t.adjustment_reason || null,
+          created_at: t.created_at || new Date().toISOString(),
+        }));
+
+        const { error: trxErr } = await supabase.from('transactions').upsert(cleanTrxs);
         if (trxErr) {
           console.error('Supabase transaction upsert error:', trxErr);
           setSupabaseError(`Gagal sync transaksi: ${trxErr.message}`);
         }
       }
 
-      if (newMovements && newMovements.length > 0) {
-        const cleanMovements = newMovements.map((m) => {
+      // 3. Sync stock movements (include newMovements and all existing movements)
+      const allMovs = newMovements && newMovements.length > 0
+        ? [...newMovements, ...stockMovements.filter((m) => !newMovements.some((nm) => nm.id === m.id))]
+        : stockMovements;
+
+      if (allMovs.length > 0) {
+        const cleanMovements = allMovs.map((m) => {
           const foundIng = ingredients.find(
             (i) =>
               i.id === m.ingredient_id ||
@@ -819,7 +829,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   ) => {
     const now = Date.now();
     const trxId = `trx-pur-${now}`;
-    const isoDate = date ? new Date(date).toISOString() : new Date(now).toISOString();
+    const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
     const newTrx: Transaction = {
       id: trxId,
       type: 'purchase',
@@ -878,7 +888,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   ) => {
     const now = Date.now();
     const trxId = `trx-prep-${now}`;
-    const isoDate = date ? new Date(date).toISOString() : new Date(now).toISOString();
+    const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
     const newTrx: Transaction = {
       id: trxId,
       type: 'prepare',
@@ -982,7 +992,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const now = Date.now();
     const trxId = `trx-prod-${now}`;
-    const isoDate = date ? new Date(date).toISOString() : new Date(now).toISOString();
+    const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
     const newTrx: Transaction = {
       id: trxId,
       type: 'production',
@@ -1097,7 +1107,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const updatedIng: Ingredient = { ...ing, current_stock: newStock };
 
-    const isoDate = date ? new Date(date).toISOString() : new Date(now).toISOString();
+    const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
     const newTrx: Transaction = {
       id: trxId,
       type: 'adjustment',
@@ -1137,15 +1147,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const getYYYYMMDD = (input: string | Date): string => {
       if (!input) return new Date().toISOString().slice(0, 10);
       if (typeof input === 'string') {
-        if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
-        return input.slice(0, 10);
+        const trimmed = input.trim();
+        const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (match) return match[1];
       }
-      const d = new Date(input);
-      if (isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
+      if (input instanceof Date && !isNaN(input.getTime())) {
+        const y = input.getFullYear();
+        const m = String(input.getMonth() + 1).padStart(2, '0');
+        const day = String(input.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
+      return new Date().toISOString().slice(0, 10);
     };
 
     const targetDate = getYYYYMMDD(dateFilter);
