@@ -79,10 +79,16 @@ export const MenusManager: React.FC = () => {
 
     setRecipeNotes(recipe?.notes || `Formula resep ${menu.name}`);
     if (details.length > 0) {
+      const uniqueDetailsMap = new Map<string, string>();
+      for (const d of details) {
+        if (d.ingredient_id) {
+          uniqueDetailsMap.set(d.ingredient_id, String(d.quantity));
+        }
+      }
       setRecipeItems(
-        details.map((d) => ({
-          ingredient_id: d.ingredient_id,
-          quantity: String(d.quantity),
+        Array.from(uniqueDetailsMap.entries()).map(([ingId, qty]) => ({
+          ingredient_id: ingId,
+          quantity: qty,
         }))
       );
     } else {
@@ -111,12 +117,18 @@ export const MenusManager: React.FC = () => {
 
   const handleSaveRecipeVersion = () => {
     if (!selectedMenuForRecipe) return;
-    const validDetails = recipeItems
-      .filter((item) => item.ingredient_id && Number(item.quantity) > 0)
-      .map((item) => ({
-        ingredient_id: item.ingredient_id,
-        quantity: Number(item.quantity),
-      }));
+
+    const ingredientMap = new Map<string, number>();
+    for (const item of recipeItems) {
+      if (item.ingredient_id && Number(item.quantity) > 0) {
+        ingredientMap.set(item.ingredient_id, Number(item.quantity));
+      }
+    }
+
+    const validDetails = Array.from(ingredientMap.entries()).map(([ingId, qty]) => ({
+      ingredient_id: ingId,
+      quantity: qty,
+    }));
 
     if (validDetails.length === 0) {
       alert('Resep harus memiliki minimal 1 bahan baku valid!');

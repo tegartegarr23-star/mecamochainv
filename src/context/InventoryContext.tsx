@@ -157,6 +157,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
+  // Helper to deduplicate recipe details by (recipe_id, ingredient_id)
+  const sanitizeRecipeDetails = (detailsList: RecipeDetail[]): RecipeDetail[] => {
+    if (!Array.isArray(detailsList)) return [];
+    const map = new Map<string, RecipeDetail>();
+    for (const item of detailsList) {
+      if (item && item.recipe_id && item.ingredient_id) {
+        const key = `${item.recipe_id}_${item.ingredient_id}`;
+        map.set(key, item);
+      }
+    }
+    return Array.from(map.values());
+  };
+
   // State Declarations
   const [users, setUsers] = useState<AppUser[]>(() => loadFromStorage(STORAGE_KEYS.USERS, INITIAL_USERS));
   const [currentUser, setCurrentUser] = useState<AppUser>(() => loadFromStorage(STORAGE_KEYS.CURRENT_USER, INITIAL_USERS[0]));
@@ -166,7 +179,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [ingredients, setIngredients] = useState<Ingredient[]>(() => loadFromStorage(STORAGE_KEYS.INGREDIENTS, INITIAL_INGREDIENTS));
   const [menus, setMenus] = useState<Menu[]>(() => loadFromStorage(STORAGE_KEYS.MENUS, INITIAL_MENUS));
   const [recipes, setRecipes] = useState<Recipe[]>(() => loadFromStorage(STORAGE_KEYS.RECIPES, INITIAL_RECIPES));
-  const [recipeDetails, setRecipeDetails] = useState<RecipeDetail[]>(() => loadFromStorage(STORAGE_KEYS.RECIPE_DETAILS, INITIAL_RECIPE_DETAILS));
+  const [recipeDetails, setRecipeDetails] = useState<RecipeDetail[]>(() => sanitizeRecipeDetails(loadFromStorage(STORAGE_KEYS.RECIPE_DETAILS, INITIAL_RECIPE_DETAILS)));
   const [transactions, setTransactions] = useState<Transaction[]>(() => loadFromStorage(STORAGE_KEYS.TRANSACTIONS, INITIAL_TRANSACTIONS));
   const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => loadFromStorage(STORAGE_KEYS.STOCK_MOVEMENTS, INITIAL_STOCK_MOVEMENTS));
 
@@ -358,7 +371,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (sbSuppliers && sbSuppliers.length > 0) setSuppliers((prev) => mergeByField(prev, sbSuppliers, 'id'));
       if (sbMenus && sbMenus.length > 0) setMenus((prev) => mergeByField(prev, sbMenus, 'id'));
       if (sbRecipes && sbRecipes.length > 0) setRecipes((prev) => mergeByField(prev, sbRecipes, 'id'));
-      if (recipeDetailsData && recipeDetailsData.length > 0) setRecipeDetails((prev) => mergeByField(prev, recipeDetailsData, 'id'));
+      if (recipeDetailsData && recipeDetailsData.length > 0) setRecipeDetails((prev) => sanitizeRecipeDetails(mergeByField(prev, recipeDetailsData, 'id')));
 
       const cleanMovements = (stockMovementsData || []).map((m) => ({
         ...m,
@@ -1026,7 +1039,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     details: Array<{ ingredient_id: string; quantity: number }>
   ) => {
     const existingRecipe = recipes.find((r) => r.menu_id === menuId);
-    const recipeId = existingRecipe ? existingRecipe.id : `rec-${Date.now()}`;
+    const recipeId = existingRecipe ? existingRecipe.id : `rec-${menuId}`;
     const recipeVersion = existingRecipe ? existingRecipe.version || 1 : 1;
 
     const recipeObj: Recipe = {
@@ -1038,11 +1051,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       created_at: existingRecipe ? existingRecipe.created_at : new Date().toISOString(),
     };
 
-    const newDetails: RecipeDetail[] = details.map((d, index) => ({
-      id: `rd-${Date.now()}-${index}`,
+    // Deduplicate input details by ingredient_id
+    const uniqueDetailsMap = new Map<string, number>();
+    for (const d of details) {
+      if (d.ingredient_id && Number(d.quantity) > 0) {
+        uniqueDetailsMap.set(d.ingredient_id, Number(d.quantity));
+      }
+    }
+
+    const newDetails: RecipeDetail[] = Array.from(uniqueDetailsMap.entries()).map(([ingId, qty]) => ({
+      id: `rd-${recipeId}-${ingId}`,
       recipe_id: recipeId,
-      ingredient_id: d.ingredient_id,
-      quantity: Number(d.quantity),
+      ingredient_id: ingId,
+      quantity: qty,
     }));
 
     if (existingRecipe) {
@@ -1051,10 +1072,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setRecipes((prev) => [...prev, recipeObj]);
     }
 
-    setRecipeDetails((prev) => [
-      ...prev.filter((rd) => rd.recipe_id !== recipeId),
-      ...newDetails,
-    ]);
+    // Replace all existing details for this recipe/menu with sanitized new details
+    setRecipeDetails((prev) =>
+      sanitizeRecipeDetails([
+        ...prev.filter((rd) => rd.recipe_id !== recipeId && !rd.id.startsWith(`rd-${recipeId}-`)),
+        ...newDetails,
+      ])
+    );
 
     setMenus((prev) =>
       prev.map((m) => (m.id === menuId ? { ...m, active_recipe_version: recipeVersion } : m))
@@ -1138,17 +1162,23 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     if (!recipe) return { recipe: undefined, details: [] };
 
-    const details = recipeDetails
-      .filter((rd) => rd.recipe_id === recipe.id)
-      .map((rd) => {
-        const ing = ingredients.find((i) => i.id === rd.ingredient_id);
-        const unit = units.find((u) => u.id === ing?.unit_id);
-        return {
-          ...rd,
-          ingredient: ing,
-          unit: unit,
-        };
-      });
+    const rawDetails = recipeDetails.filter((rd) => rd.recipe_id === recipe.id);
+    const uniqueDetailsMap = new Map<string, RecipeDetail>();
+    for (const rd of rawDetails) {
+      if (rd && rd.ingredient_id) {
+        uniqueDetailsMap.set(rd.ingredient_id, rd);
+      }
+    }
+
+    const details = Array.from(uniqueDetailsMap.values()).map((rd) => {
+      const ing = ingredients.find((i) => i.id === rd.ingredient_id);
+      const unit = units.find((u) => u.id === ing?.unit_id);
+      return {
+        ...rd,
+        ingredient: ing,
+        unit: unit,
+      };
+    });
 
     return { recipe, details };
   };
