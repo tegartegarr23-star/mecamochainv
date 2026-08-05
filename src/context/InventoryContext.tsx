@@ -371,7 +371,33 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (sbSuppliers && sbSuppliers.length > 0) setSuppliers((prev) => mergeByField(prev, sbSuppliers, 'id'));
       if (sbMenus && sbMenus.length > 0) setMenus((prev) => mergeByField(prev, sbMenus, 'id'));
       if (sbRecipes && sbRecipes.length > 0) setRecipes((prev) => mergeByField(prev, sbRecipes, 'id'));
-      if (recipeDetailsData && recipeDetailsData.length > 0) setRecipeDetails((prev) => sanitizeRecipeDetails(mergeByField(prev, recipeDetailsData, 'id')));
+      if (recipeDetailsData && recipeDetailsData.length > 0) {
+        setRecipeDetails((prev) => {
+          const merged = sanitizeRecipeDetails(mergeByField(prev, recipeDetailsData, 'id'));
+          const recipeGroups = new Map<string, RecipeDetail[]>();
+          for (const rd of merged) {
+            if (rd && rd.recipe_id) {
+              const list = recipeGroups.get(rd.recipe_id) || [];
+              list.push(rd);
+              recipeGroups.set(rd.recipe_id, list);
+            }
+          }
+
+          const cleanedList: RecipeDetail[] = [];
+          for (const [, group] of recipeGroups.entries()) {
+            const userSaved = group.filter((rd) => rd.id && rd.id.startsWith('rd-rec-'));
+            const targetGroup = userSaved.length > 0 ? userSaved : group;
+            const ingMap = new Map<string, RecipeDetail>();
+            for (const item of targetGroup) {
+              if (item && item.ingredient_id) {
+                ingMap.set(item.ingredient_id, item);
+              }
+            }
+            cleanedList.push(...Array.from(ingMap.values()));
+          }
+          return cleanedList;
+        });
+      }
 
       const cleanMovements = (stockMovementsData || []).map((m) => ({
         ...m,
@@ -1038,9 +1064,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     notes: string,
     details: Array<{ ingredient_id: string; quantity: number }>
   ) => {
-    const existingRecipe = recipes.find((r) => r.menu_id === menuId);
-    const recipeId = existingRecipe ? existingRecipe.id : `rec-${menuId}`;
-    const recipeVersion = existingRecipe ? existingRecipe.version || 1 : 1;
+    const canonicalRecipeId = `rec-${menuId}`;
+    const existingRecipe = recipes.find((r) => r.menu_id === menuId || r.id === canonicalRecipeId);
+    const recipeId = existingRecipe ? existingRecipe.id : canonicalRecipeId;
+    const recipeVersion = 1;
 
     const recipeObj: Recipe = {
       id: recipeId,
@@ -1060,22 +1087,38 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     const newDetails: RecipeDetail[] = Array.from(uniqueDetailsMap.entries()).map(([ingId, qty]) => ({
-      id: `rd-${recipeId}-${ingId}`,
+      id: `rd-rec-${menuId}-${ingId}`,
       recipe_id: recipeId,
       ingredient_id: ingId,
       quantity: qty,
     }));
 
-    if (existingRecipe) {
-      setRecipes((prev) => prev.map((r) => (r.id === recipeId ? recipeObj : r)));
-    } else {
-      setRecipes((prev) => [...prev, recipeObj]);
-    }
+    // Clean recipes state: keep 1 recipe per menu_id
+    setRecipes((prev) => [
+      ...prev.filter((r) => r.menu_id !== menuId && r.id !== recipeId),
+      recipeObj,
+    ]);
+
+    // Build set of all recipe IDs associated with this menu
+    const possibleRecipeIds = new Set<string>([
+      recipeId,
+      `rec-${menuId}`,
+      `rec-${menuId.replace('-', '')}`,
+      menuId,
+    ]);
+    recipes.filter((r) => r.menu_id === menuId).forEach((r) => possibleRecipeIds.add(r.id));
 
     // Replace all existing details for this recipe/menu with sanitized new details
     setRecipeDetails((prev) =>
       sanitizeRecipeDetails([
-        ...prev.filter((rd) => rd.recipe_id !== recipeId && !rd.id.startsWith(`rd-${recipeId}-`)),
+        ...prev.filter(
+          (rd) =>
+            !rd ||
+            !rd.recipe_id ||
+            (!possibleRecipeIds.has(rd.recipe_id) &&
+              !rd.id.includes(menuId) &&
+              !rd.id.includes(recipeId))
+        ),
         ...newDetails,
       ])
     );
@@ -1156,15 +1199,34 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const getMenuRecipeDetails = (menuId: string, version?: number) => {
-    let recipe = version
-      ? recipes.find((r) => r.menu_id === menuId && r.version === version)
-      : recipes.find((r) => r.menu_id === menuId && r.is_active) || recipes.find((r) => r.menu_id === menuId);
+    let recipe = recipes.find((r) => r.menu_id === menuId && r.is_active) || recipes.find((r) => r.menu_id === menuId);
 
-    if (!recipe) return { recipe: undefined, details: [] };
+    if (!recipe) {
+      recipe = {
+        id: `rec-${menuId}`,
+        menu_id: menuId,
+        version: 1,
+        is_active: true,
+        notes: `Resep ${menuId}`,
+        created_at: new Date().toISOString(),
+      };
+    }
 
-    const rawDetails = recipeDetails.filter((rd) => rd.recipe_id === recipe.id);
+    const possibleRecipeIds = new Set<string>([
+      recipe.id,
+      `rec-${menuId}`,
+      `rec-${menuId.replace('-', '')}`,
+      menuId,
+    ]);
+    recipes.filter((r) => r.menu_id === menuId).forEach((r) => possibleRecipeIds.add(r.id));
+
+    const rawDetails = recipeDetails.filter((rd) => rd && rd.recipe_id && possibleRecipeIds.has(rd.recipe_id));
+
+    const userSaved = rawDetails.filter((rd) => rd.id && (rd.id.startsWith('rd-rec-') || rd.id.startsWith(`rd-${recipe.id}`)));
+    const targetDetails = userSaved.length > 0 ? userSaved : rawDetails;
+
     const uniqueDetailsMap = new Map<string, RecipeDetail>();
-    for (const rd of rawDetails) {
+    for (const rd of targetDetails) {
       if (rd && rd.ingredient_id) {
         uniqueDetailsMap.set(rd.ingredient_id, rd);
       }

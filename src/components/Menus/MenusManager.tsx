@@ -105,9 +105,11 @@ export const MenusManager: React.FC = () => {
   };
 
   const handleAddRecipeRow = () => {
+    const existingIngIds = new Set(recipeItems.map((i) => i.ingredient_id));
+    const nextAvailableIng = ingredients.find((i) => !existingIngIds.has(i.id)) || ingredients[0];
     setRecipeItems([
       ...recipeItems,
-      { ingredient_id: ingredients[0]?.id || '', quantity: '10' },
+      { ingredient_id: nextAvailableIng?.id || '', quantity: '10' },
     ]);
   };
 
