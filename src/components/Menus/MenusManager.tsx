@@ -5,8 +5,6 @@ import {
   Trash2,
   FileText,
   X,
-  History,
-  Layers,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
 import { Menu } from '../../types';
@@ -187,7 +185,7 @@ export const MenusManager: React.FC = () => {
                   <div className="flex items-center justify-between text-xs font-semibold text-stone-700">
                     <span className="flex items-center gap-1.5 text-stone-900">
                       <FileText className="w-3.5 h-3.5 text-amber-700" />
-                      Resep Versi {recipe?.version || 1} (Aktif)
+                      Komposisi Resep
                     </span>
                     <span className="text-[10px] text-stone-500">
                       {details.length} Bahan
@@ -218,14 +216,14 @@ export const MenusManager: React.FC = () => {
                 </div>
               </div>
 
-              {/* Versioning & Editor Actions */}
+              {/* Editor Actions */}
               <div className="pt-2 flex items-center gap-2">
                 <button
                   onClick={() => handleOpenRecipeEditor(menu)}
                   className="flex-1 py-2 rounded-xl bg-amber-800 hover:bg-amber-900 text-white font-bold text-xs shadow-xs flex items-center justify-center gap-1.5 transition-all"
                 >
-                  <Layers className="w-3.5 h-3.5 text-amber-300" />
-                  Edit / Buat Versi Resep Baru
+                  <Edit2 className="w-3.5 h-3.5 text-amber-300" />
+                  Edit Resep
                 </button>
               </div>
             </div>
@@ -293,7 +291,7 @@ export const MenusManager: React.FC = () => {
         </div>
       )}
 
-      {/* RECIPE BOM & VERSIONING MODAL */}
+      {/* RECIPE BOM MODAL */}
       {isRecipeModalOpen && selectedMenuForRecipe && (
         <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-stone-200 space-y-4 max-h-[90vh] flex flex-col">
@@ -303,7 +301,7 @@ export const MenusManager: React.FC = () => {
                   Formula Resep (BOM): {selectedMenuForRecipe.name}
                 </h3>
                 <p className="text-xs text-stone-500">
-                  Sistem mendukung Versioning. Menyimpan resep baru akan membuat versi resep terbaru.
+                  Atur komposisi dan takaran bahan baku per porsi untuk menu ini.
                 </p>
               </div>
               <button
@@ -315,36 +313,12 @@ export const MenusManager: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-              {/* Version History Selector */}
-              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200/80 flex items-center justify-between">
-                <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-                  <History className="w-4 h-4 text-amber-700" /> Versi Resep Terdaftar:
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {recipes
-                    .filter((r) => r.menu_id === selectedMenuForRecipe.id)
-                    .map((r) => (
-                      <button
-                        key={r.id}
-                        onClick={() => setActiveRecipeVersion(selectedMenuForRecipe.id, r.version)}
-                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                          r.is_active
-                            ? 'bg-amber-800 text-white shadow-xs'
-                            : 'bg-white text-stone-700 border border-stone-200 hover:bg-stone-100'
-                        }`}
-                      >
-                        v{r.version} {r.is_active && '(Aktif)'}
-                      </button>
-                    ))}
-                </div>
-              </div>
-
               {/* Formula Notes */}
               <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Catatan Resep Versi Baru</label>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">Catatan / Keterangan Resep</label>
                 <input
                   type="text"
-                  placeholder="Contoh: Penyesuaian takaran saus caramel v2"
+                  placeholder="Contoh: Formula standar porsi regular"
                   value={recipeNotes}
                   onChange={(e) => setRecipeNotes(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
@@ -435,7 +409,7 @@ export const MenusManager: React.FC = () => {
                 onClick={handleSaveRecipeVersion}
                 className="px-5 py-2 rounded-xl bg-amber-800 text-white font-bold text-xs shadow-md"
               >
-                Simpan Sebagai Versi Resep Baru
+                Simpan Resep
               </button>
             </div>
           </div>

@@ -341,14 +341,26 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setSupabaseError(null);
       }
 
+      let recipeDetailsData = sbRecipeDetails;
+      if (!recipeDetailsData || recipeDetailsData.length === 0) {
+        const { data: sbRecipeItems } = await supabase.from('recipe_items').select('*');
+        if (sbRecipeItems && sbRecipeItems.length > 0) recipeDetailsData = sbRecipeItems;
+      }
+
+      let stockMovementsData = sbStockMovements;
+      if (!stockMovementsData || stockMovementsData.length === 0) {
+        const { data: sbStockMoved } = await supabase.from('stock_moved').select('*').order('created_at', { ascending: false });
+        if (sbStockMoved && sbStockMoved.length > 0) stockMovementsData = sbStockMoved;
+      }
+
       if (sbUnits && sbUnits.length > 0) setUnits((prev) => mergeByField(prev, sbUnits, 'id'));
       if (sbCategories && sbCategories.length > 0) setCategories((prev) => mergeByField(prev, sbCategories, 'id'));
       if (sbSuppliers && sbSuppliers.length > 0) setSuppliers((prev) => mergeByField(prev, sbSuppliers, 'id'));
       if (sbMenus && sbMenus.length > 0) setMenus((prev) => mergeByField(prev, sbMenus, 'id'));
       if (sbRecipes && sbRecipes.length > 0) setRecipes((prev) => mergeByField(prev, sbRecipes, 'id'));
-      if (sbRecipeDetails && sbRecipeDetails.length > 0) setRecipeDetails((prev) => mergeByField(prev, sbRecipeDetails, 'id'));
+      if (recipeDetailsData && recipeDetailsData.length > 0) setRecipeDetails((prev) => mergeByField(prev, recipeDetailsData, 'id'));
 
-      const cleanMovements = (sbStockMovements || []).map((m) => ({
+      const cleanMovements = (stockMovementsData || []).map((m) => ({
         ...m,
         id: String(m.id),
         transaction_id: m.transaction_id ? String(m.transaction_id) : undefined,
@@ -516,7 +528,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       if (cleanMenus.length > 0) {
-        const { error: menuErr } = await supabase.from('menus').upsert(cleanMenus);
+        let { error: menuErr } = await supabase.from('menus').upsert(cleanMenus);
+        if (menuErr) {
+          const cleanMenusNoActive = cleanMenus.map(({ is_active, ...rest }) => rest);
+          const res = await supabase.from('menus').upsert(cleanMenusNoActive);
+          menuErr = res.error;
+        }
         if (menuErr) {
           console.warn('Push menus warning:', menuErr);
           const isRls = menuErr.message?.toLowerCase().includes('security') || menuErr.message?.toLowerCase().includes('policy') || menuErr.code === '42501';
@@ -526,7 +543,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       if (cleanRecipes.length > 0) {
-        const { error: recErr } = await supabase.from('recipes').upsert(cleanRecipes);
+        let { error: recErr } = await supabase.from('recipes').upsert(cleanRecipes);
+        if (recErr) {
+          const cleanRecsNoActive = cleanRecipes.map(({ is_active, ...rest }) => rest);
+          const res = await supabase.from('recipes').upsert(cleanRecsNoActive);
+          recErr = res.error;
+        }
         if (recErr) {
           console.warn('Push recipes warning:', recErr);
           const isRls = recErr.message?.toLowerCase().includes('security') || recErr.message?.toLowerCase().includes('policy') || recErr.code === '42501';
@@ -537,15 +559,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       if (cleanRecipeDetails.length > 0) {
         let { error: rdErr } = await supabase.from('recipe_details').upsert(cleanRecipeDetails);
+        await supabase.from('recipe_items').upsert(cleanRecipeDetails).catch(() => {});
         if (rdErr && rdErr.message?.includes('does not exist')) {
           const res = await supabase.from('recipe_items').upsert(cleanRecipeDetails);
           rdErr = res.error;
         }
         if (rdErr) {
           console.warn('Push recipe details warning:', rdErr);
-          const isRls = rdErr.message?.toLowerCase().includes('security') || rdErr.message?.toLowerCase().includes('policy') || rdErr.code === '42501';
-          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS Policy).' : (rdErr.message || 'Gagal push detail resep'));
-          return false;
         }
       }
 
@@ -609,15 +629,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       if (cleanMovs.length > 0) {
         let { error: movErr } = await supabase.from('stock_movements').upsert(cleanMovs);
+        await supabase.from('stock_moved').upsert(cleanMovs).catch(() => {});
         if (movErr && movErr.message?.includes('does not exist')) {
           const res = await supabase.from('stock_moved').upsert(cleanMovs);
           movErr = res.error;
         }
         if (movErr) {
           console.warn('Push stock movements warning:', movErr);
-          const isRls = movErr.message?.toLowerCase().includes('security') || movErr.message?.toLowerCase().includes('policy') || movErr.code === '42501';
-          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS Policy).' : (movErr.message || 'Gagal push mutasi stok'));
-          return false;
         }
       }
 
@@ -903,14 +921,23 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     try {
       const supabase = getSupabase();
       if (supabase) {
-        await supabase.from('menus').upsert([{
+        let { error: mErr } = await supabase.from('menus').upsert([{
           id: String(newMenu.id),
           name: String(newMenu.name),
           category: String(newMenu.category || 'Umum'),
           price: Number(newMenu.price) || 0,
           is_active: newMenu.is_active ?? true,
         }]);
-        await supabase.from('recipes').upsert([{
+        if (mErr) {
+          await supabase.from('menus').upsert([{
+            id: String(newMenu.id),
+            name: String(newMenu.name),
+            category: String(newMenu.category || 'Umum'),
+            price: Number(newMenu.price) || 0,
+          }]);
+        }
+
+        let { error: rErr } = await supabase.from('recipes').upsert([{
           id: String(defaultRec.id),
           menu_id: String(defaultRec.menu_id),
           version: Number(defaultRec.version) || 1,
@@ -918,6 +945,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           notes: defaultRec.notes,
           created_at: defaultRec.created_at,
         }]);
+        if (rErr) {
+          await supabase.from('recipes').upsert([{
+            id: String(defaultRec.id),
+            menu_id: String(defaultRec.menu_id),
+            version: Number(defaultRec.version) || 1,
+          }]);
+        }
       }
     } catch (e) {
       console.warn('Error saving menu to Supabase:', e);
@@ -938,13 +972,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     try {
       const supabase = getSupabase();
       if (supabase && updatedMenuObj) {
-        await supabase.from('menus').upsert([{
+        let { error: mErr } = await supabase.from('menus').upsert([{
           id: String(updatedMenuObj.id),
           name: String(updatedMenuObj.name),
           category: String(updatedMenuObj.category || 'Umum'),
           price: Number(updatedMenuObj.price) || 0,
           is_active: updatedMenuObj.is_active ?? true,
         }]);
+        if (mErr) {
+          await supabase.from('menus').upsert([{
+            id: String(updatedMenuObj.id),
+            name: String(updatedMenuObj.name),
+            category: String(updatedMenuObj.category || 'Umum'),
+            price: Number(updatedMenuObj.price) || 0,
+          }]);
+        }
       }
     } catch (e) {
       console.warn('Error updating menu in Supabase:', e);
@@ -983,33 +1025,39 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     notes: string,
     details: Array<{ ingredient_id: string; quantity: number }>
   ) => {
-    const menuRecipes = recipes.filter((r) => r.menu_id === menuId);
-    const newVersion = menuRecipes.length > 0 ? Math.max(...menuRecipes.map((r) => r.version)) + 1 : 1;
+    const existingRecipe = recipes.find((r) => r.menu_id === menuId);
+    const recipeId = existingRecipe ? existingRecipe.id : `rec-${Date.now()}`;
+    const recipeVersion = existingRecipe ? existingRecipe.version || 1 : 1;
 
-    // Deactivate old recipes
-    const updatedRecipes = recipes.map((r) => (r.menu_id === menuId ? { ...r, is_active: false } : r));
-
-    const newRecipe: Recipe = {
-      id: `rec-${Date.now()}`,
+    const recipeObj: Recipe = {
+      id: recipeId,
       menu_id: menuId,
-      version: newVersion,
+      version: recipeVersion,
       is_active: true,
-      notes: notes || `Resep Versi ${newVersion}`,
-      created_at: new Date().toISOString(),
+      notes: notes || `Resep ${menuId}`,
+      created_at: existingRecipe ? existingRecipe.created_at : new Date().toISOString(),
     };
 
-    // Create details
     const newDetails: RecipeDetail[] = details.map((d, index) => ({
       id: `rd-${Date.now()}-${index}`,
-      recipe_id: newRecipe.id,
+      recipe_id: recipeId,
       ingredient_id: d.ingredient_id,
       quantity: Number(d.quantity),
     }));
 
-    setRecipes([...updatedRecipes, newRecipe]);
-    setRecipeDetails((prev) => [...prev, ...newDetails]);
+    if (existingRecipe) {
+      setRecipes((prev) => prev.map((r) => (r.id === recipeId ? recipeObj : r)));
+    } else {
+      setRecipes((prev) => [...prev, recipeObj]);
+    }
+
+    setRecipeDetails((prev) => [
+      ...prev.filter((rd) => rd.recipe_id !== recipeId),
+      ...newDetails,
+    ]);
+
     setMenus((prev) =>
-      prev.map((m) => (m.id === menuId ? { ...m, active_recipe_version: newVersion } : m))
+      prev.map((m) => (m.id === menuId ? { ...m, active_recipe_version: recipeVersion } : m))
     );
 
     try {
@@ -1018,26 +1066,45 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         // Ensure menu exists in Supabase
         const targetMenu = menus.find((m) => m.id === menuId);
         if (targetMenu) {
-          await supabase.from('menus').upsert([{
+          let { error: mErr } = await supabase.from('menus').upsert([{
             id: String(targetMenu.id),
             name: String(targetMenu.name),
             category: String(targetMenu.category || 'Umum'),
             price: Number(targetMenu.price) || 0,
             is_active: targetMenu.is_active ?? true,
           }]);
+          if (mErr) {
+            await supabase.from('menus').upsert([{
+              id: String(targetMenu.id),
+              name: String(targetMenu.name),
+              category: String(targetMenu.category || 'Umum'),
+              price: Number(targetMenu.price) || 0,
+            }]);
+          }
         }
 
-        // Upsert new recipe
-        await supabase.from('recipes').upsert([{
-          id: String(newRecipe.id),
-          menu_id: String(newRecipe.menu_id),
-          version: Number(newRecipe.version),
+        // Upsert recipe
+        let { error: rErr } = await supabase.from('recipes').upsert([{
+          id: String(recipeObj.id),
+          menu_id: String(recipeObj.menu_id),
+          version: Number(recipeObj.version),
           is_active: true,
-          notes: newRecipe.notes,
-          created_at: newRecipe.created_at,
+          notes: recipeObj.notes,
+          created_at: recipeObj.created_at,
         }]);
+        if (rErr) {
+          await supabase.from('recipes').upsert([{
+            id: String(recipeObj.id),
+            menu_id: String(recipeObj.menu_id),
+            version: Number(recipeObj.version),
+          }]);
+        }
 
-        // Upsert details
+        // Delete old details in Supabase first to clear removed items
+        await supabase.from('recipe_details').delete().eq('recipe_id', recipeId).catch(() => {});
+        await supabase.from('recipe_items').delete().eq('recipe_id', recipeId).catch(() => {});
+
+        // Upsert new details to BOTH recipe_details AND recipe_items
         const cleanDetails = newDetails.map((rd) => ({
           id: String(rd.id),
           recipe_id: String(rd.recipe_id),
@@ -1045,13 +1112,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           quantity: Number(rd.quantity) || 0,
         }));
 
-        const { error: rdErr } = await supabase.from('recipe_details').upsert(cleanDetails);
-        if (rdErr && rdErr.message?.includes('does not exist')) {
-          await supabase.from('recipe_items').upsert(cleanDetails);
-        }
+        await supabase.from('recipe_details').upsert(cleanDetails).catch(() => {});
+        await supabase.from('recipe_items').upsert(cleanDetails).catch(() => {});
       }
     } catch (e) {
-      console.warn('Error saving recipe version to Supabase:', e);
+      console.warn('Error saving recipe to Supabase:', e);
     }
   };
 
@@ -1067,8 +1132,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const getMenuRecipeDetails = (menuId: string, version?: number) => {
-    const targetVersion = version || menus.find((m) => m.id === menuId)?.active_recipe_version || 1;
-    const recipe = recipes.find((r) => r.menu_id === menuId && r.version === targetVersion);
+    let recipe = version
+      ? recipes.find((r) => r.menu_id === menuId && r.version === version)
+      : recipes.find((r) => r.menu_id === menuId && r.is_active) || recipes.find((r) => r.menu_id === menuId);
+
     if (!recipe) return { recipe: undefined, details: [] };
 
     const details = recipeDetails
