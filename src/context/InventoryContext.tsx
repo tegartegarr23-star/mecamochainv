@@ -1344,7 +1344,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           newStock = currentStock + qty;
         } else {
           // Source raw ingredient (Out)
-          newStock = Math.max(0, currentStock - qty);
+          newStock = currentStock - qty;
         }
 
         updatedIngredients[ingIndex] = { ...currentIng, current_stock: newStock };
@@ -1445,7 +1445,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (ingIndex !== -1) {
         const currentIng = updatedIngredients[ingIndex];
         const currentStock = getIngredientCurrentStock(currentIng, stockMovements);
-        const newStock = Math.max(0, currentStock - item.requiredQty);
+        const newStock = currentStock - item.requiredQty;
         updatedIngredients[ingIndex] = { ...currentIng, current_stock: newStock };
 
         newMovements.push({
@@ -1529,7 +1529,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     let moveType: 'in' | 'out' = 'out';
 
     if (mode === 'set') {
-      newStock = Math.max(0, qty);
+      newStock = qty;
       const diff = newStock - currentStock;
       moveType = diff >= 0 ? 'in' : 'out';
       moveQty = Math.abs(diff);
@@ -1538,7 +1538,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       moveType = 'in';
       moveQty = qty;
     } else {
-      newStock = Math.max(0, currentStock - qty);
+      newStock = currentStock - qty;
       moveType = 'out';
       moveQty = qty;
     }
@@ -1709,14 +1709,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         ingredient: { ...ing, current_stock: liveStock },
         unit,
         category: cat,
-        initial_stock: Math.max(0, initial_stock),
+        initial_stock,
         in_purchase,
         in_prepare,
         out_prepare,
         out_production,
         in_adjustment,
         out_adjustment,
-        final_stock: Math.max(0, final_stock),
+        final_stock,
       };
     });
   };

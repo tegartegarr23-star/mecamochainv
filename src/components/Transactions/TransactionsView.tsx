@@ -298,16 +298,20 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
               <button
                 type="submit"
-                disabled={!productionSufficiency.isSufficient}
+                disabled={productionSufficiency.items.length === 0}
                 className={`w-full py-2.5 rounded-xl text-white font-bold text-xs shadow-md transition-all ${
-                  productionSufficiency.isSufficient
+                  productionSufficiency.items.length === 0
+                    ? 'bg-stone-300 cursor-not-allowed'
+                    : productionSufficiency.isSufficient
                     ? 'bg-amber-800 hover:bg-amber-900'
-                    : 'bg-stone-300 cursor-not-allowed'
+                    : 'bg-amber-700 hover:bg-amber-800'
                 }`}
               >
-                {productionSufficiency.isSufficient
+                {productionSufficiency.items.length === 0
+                  ? 'Resep Belum Dikonfigurasi'
+                  : productionSufficiency.isSufficient
                   ? 'Proses & Potong Stok Otomatis'
-                  : 'Stok Kurang (Tidak Dapat Disimpan)'}
+                  : 'Proses & Potong Stok (Stok Akan Minus)'}
               </button>
             </form>
           </div>
@@ -330,8 +334,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Stok Sangat Cukup
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-100 text-rose-800 text-xs font-bold border border-rose-200">
-                  <AlertTriangle className="w-4 h-4 text-rose-600 animate-pulse" /> Stok Tidak Cukup!
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-bold border border-amber-200">
+                  <AlertTriangle className="w-4 h-4 text-amber-600" /> Stok Kurang (Minus)
                 </span>
               )}
             </div>
@@ -864,7 +868,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                   ? adjQty
                   : adjMode === 'plus'
                   ? currentIng.current_stock + adjQty
-                  : Math.max(0, currentIng.current_stock - adjQty);
+                  : currentIng.current_stock - adjQty;
 
               const diff = targetStock - currentIng.current_stock;
 
