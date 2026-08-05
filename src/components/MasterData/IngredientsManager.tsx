@@ -15,7 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
-import { Ingredient, IngredientType } from '../../types';
+import { Ingredient, IngredientType, Unit, Category, Supplier } from '../../types';
 import { formatNumber, formatCurrency } from '../../utils/formatters';
 
 export const IngredientsManager: React.FC = () => {
@@ -28,8 +28,14 @@ export const IngredientsManager: React.FC = () => {
     updateIngredient,
     deleteIngredient,
     addUnit,
+    updateUnit,
+    deleteUnit,
     addCategory,
+    updateCategory,
+    deleteCategory,
     addSupplier,
+    updateSupplier,
+    deleteSupplier,
   } = useInventory();
 
   // Active subtab in Master Data
@@ -58,13 +64,18 @@ export const IngredientsManager: React.FC = () => {
     is_active: true,
   });
 
-  // Master Data Add Quick States
+  // Master Data Quick & Edit States
   const [newUnitName, setNewUnitName] = useState('');
   const [newUnitAbbr, setNewUnitAbbr] = useState('');
+  const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
+
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+
   const [newSupplierName, setNewSupplierName] = useState('');
   const [newSupplierContact, setNewSupplierContact] = useState('');
   const [newSupplierAddress, setNewSupplierAddress] = useState('');
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
 
   // Open Create/Edit Ingredient Modal
   const handleOpenModal = (ing?: Ingredient) => {
@@ -375,15 +386,20 @@ export const IngredientsManager: React.FC = () => {
       {subTab === 'units' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs h-fit space-y-4">
-            <h3 className="font-bold text-stone-900 text-sm font-serif">Tambah Satuan Baru</h3>
+            <h3 className="font-bold text-stone-900 text-sm font-serif">
+              {editingUnit ? 'Edit Satuan' : 'Tambah Satuan Baru'}
+            </h3>
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-stone-600 mb-1">Nama Satuan</label>
                 <input
                   type="text"
                   placeholder="Contoh: Milliliter"
-                  value={newUnitName}
-                  onChange={(e) => setNewUnitName(e.target.value)}
+                  value={editingUnit ? editingUnit.name : newUnitName}
+                  onChange={(e) => {
+                    if (editingUnit) setEditingUnit({ ...editingUnit, name: e.target.value });
+                    else setNewUnitName(e.target.value);
+                  }}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                 />
               </div>
@@ -392,23 +408,42 @@ export const IngredientsManager: React.FC = () => {
                 <input
                   type="text"
                   placeholder="Contoh: ml"
-                  value={newUnitAbbr}
-                  onChange={(e) => setNewUnitAbbr(e.target.value)}
+                  value={editingUnit ? editingUnit.abbreviation : newUnitAbbr}
+                  onChange={(e) => {
+                    if (editingUnit) setEditingUnit({ ...editingUnit, abbreviation: e.target.value });
+                    else setNewUnitAbbr(e.target.value);
+                  }}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                 />
               </div>
-              <button
-                onClick={() => {
-                  if (newUnitName && newUnitAbbr) {
-                    addUnit({ name: newUnitName, abbreviation: newUnitAbbr });
-                    setNewUnitName('');
-                    setNewUnitAbbr('');
-                  }
-                }}
-                className="w-full py-2 bg-amber-800 text-white font-bold text-xs rounded-xl hover:bg-amber-900"
-              >
-                + Simpan Satuan
-              </button>
+              <div className="flex gap-2">
+                {editingUnit && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingUnit(null)}
+                    className="flex-1 py-2 bg-stone-100 text-stone-700 font-bold text-xs rounded-xl hover:bg-stone-200"
+                  >
+                    Batal
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    if (editingUnit) {
+                      if (editingUnit.name && editingUnit.abbreviation) {
+                        updateUnit(editingUnit.id, { name: editingUnit.name, abbreviation: editingUnit.abbreviation });
+                        setEditingUnit(null);
+                      }
+                    } else if (newUnitName && newUnitAbbr) {
+                      addUnit({ name: newUnitName, abbreviation: newUnitAbbr });
+                      setNewUnitName('');
+                      setNewUnitAbbr('');
+                    }
+                  }}
+                  className="flex-1 py-2 bg-amber-800 text-white font-bold text-xs rounded-xl hover:bg-amber-900"
+                >
+                  {editingUnit ? 'Update Satuan' : '+ Simpan Satuan'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -418,6 +453,7 @@ export const IngredientsManager: React.FC = () => {
                 <tr>
                   <th className="p-3.5">Nama Satuan</th>
                   <th className="p-3.5">Singkatan</th>
+                  <th className="p-3.5 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
@@ -425,6 +461,28 @@ export const IngredientsManager: React.FC = () => {
                   <tr key={u.id} className="hover:bg-stone-50">
                     <td className="p-3.5 font-bold text-stone-900">{u.name}</td>
                     <td className="p-3.5 font-mono text-stone-600">{u.abbreviation}</td>
+                    <td className="p-3.5 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => setEditingUnit(u)}
+                          className="p-1.5 rounded-lg text-stone-600 hover:bg-stone-100 hover:text-amber-800"
+                          title="Edit Satuan"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Hapus satuan "${u.name}"?`)) {
+                              deleteUnit(u.id);
+                            }
+                          }}
+                          className="p-1.5 rounded-lg text-stone-600 hover:bg-rose-50 hover:text-rose-600"
+                          title="Hapus Satuan"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -437,29 +495,50 @@ export const IngredientsManager: React.FC = () => {
       {subTab === 'categories' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs h-fit space-y-4">
-            <h3 className="font-bold text-stone-900 text-sm font-serif">Tambah Kategori Baru</h3>
+            <h3 className="font-bold text-stone-900 text-sm font-serif">
+              {editingCategory ? 'Edit Kategori' : 'Tambah Kategori Baru'}
+            </h3>
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-stone-600 mb-1">Nama Kategori</label>
                 <input
                   type="text"
                   placeholder="Contoh: Bumbu & Saus"
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  value={editingCategory ? editingCategory.name : newCategoryName}
+                  onChange={(e) => {
+                    if (editingCategory) setEditingCategory({ ...editingCategory, name: e.target.value });
+                    else setNewCategoryName(e.target.value);
+                  }}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                 />
               </div>
-              <button
-                onClick={() => {
-                  if (newCategoryName) {
-                    addCategory({ name: newCategoryName });
-                    setNewCategoryName('');
-                  }
-                }}
-                className="w-full py-2 bg-amber-800 text-white font-bold text-xs rounded-xl hover:bg-amber-900"
-              >
-                + Simpan Kategori
-              </button>
+              <div className="flex gap-2">
+                {editingCategory && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingCategory(null)}
+                    className="flex-1 py-2 bg-stone-100 text-stone-700 font-bold text-xs rounded-xl hover:bg-stone-200"
+                  >
+                    Batal
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    if (editingCategory) {
+                      if (editingCategory.name) {
+                        updateCategory(editingCategory.id, { name: editingCategory.name });
+                        setEditingCategory(null);
+                      }
+                    } else if (newCategoryName) {
+                      addCategory({ name: newCategoryName });
+                      setNewCategoryName('');
+                    }
+                  }}
+                  className="flex-1 py-2 bg-amber-800 text-white font-bold text-xs rounded-xl hover:bg-amber-900"
+                >
+                  {editingCategory ? 'Update Kategori' : '+ Simpan Kategori'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -469,6 +548,7 @@ export const IngredientsManager: React.FC = () => {
                 <tr>
                   <th className="p-3.5">Nama Kategori</th>
                   <th className="p-3.5 text-right">Jumlah Bahan Baku</th>
+                  <th className="p-3.5 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
@@ -478,6 +558,28 @@ export const IngredientsManager: React.FC = () => {
                     <tr key={c.id} className="hover:bg-stone-50">
                       <td className="p-3.5 font-bold text-stone-900">{c.name}</td>
                       <td className="p-3.5 text-right font-mono font-bold text-amber-800">{count} item</td>
+                      <td className="p-3.5 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => setEditingCategory(c)}
+                            className="p-1.5 rounded-lg text-stone-600 hover:bg-stone-100 hover:text-amber-800"
+                            title="Edit Kategori"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Hapus kategori "${c.name}"?`)) {
+                                deleteCategory(c.id);
+                              }
+                            }}
+                            className="p-1.5 rounded-lg text-stone-600 hover:bg-rose-50 hover:text-rose-600"
+                            title="Hapus Kategori"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -491,15 +593,20 @@ export const IngredientsManager: React.FC = () => {
       {subTab === 'suppliers' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs h-fit space-y-4">
-            <h3 className="font-bold text-stone-900 text-sm font-serif">Tambah Supplier Baru</h3>
+            <h3 className="font-bold text-stone-900 text-sm font-serif">
+              {editingSupplier ? 'Edit Supplier' : 'Tambah Supplier Baru'}
+            </h3>
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-stone-600 mb-1">Nama Pemasok</label>
                 <input
                   type="text"
                   placeholder="Contoh: PT Boga Utama"
-                  value={newSupplierName}
-                  onChange={(e) => setNewSupplierName(e.target.value)}
+                  value={editingSupplier ? editingSupplier.name : newSupplierName}
+                  onChange={(e) => {
+                    if (editingSupplier) setEditingSupplier({ ...editingSupplier, name: e.target.value });
+                    else setNewSupplierName(e.target.value);
+                  }}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                 />
               </div>
@@ -508,8 +615,11 @@ export const IngredientsManager: React.FC = () => {
                 <input
                   type="text"
                   placeholder="Contoh: 0812-3456-7890"
-                  value={newSupplierContact}
-                  onChange={(e) => setNewSupplierContact(e.target.value)}
+                  value={editingSupplier ? (editingSupplier.contact || '') : newSupplierContact}
+                  onChange={(e) => {
+                    if (editingSupplier) setEditingSupplier({ ...editingSupplier, contact: e.target.value });
+                    else setNewSupplierContact(e.target.value);
+                  }}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                 />
               </div>
@@ -517,29 +627,52 @@ export const IngredientsManager: React.FC = () => {
                 <label className="block text-xs font-semibold text-stone-600 mb-1">Alamat</label>
                 <textarea
                   placeholder="Alamat kantor / gudang supplier..."
-                  value={newSupplierAddress}
-                  onChange={(e) => setNewSupplierAddress(e.target.value)}
+                  value={editingSupplier ? (editingSupplier.address || '') : newSupplierAddress}
+                  onChange={(e) => {
+                    if (editingSupplier) setEditingSupplier({ ...editingSupplier, address: e.target.value });
+                    else setNewSupplierAddress(e.target.value);
+                  }}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                   rows={2}
                 />
               </div>
-              <button
-                onClick={() => {
-                  if (newSupplierName) {
-                    addSupplier({
-                      name: newSupplierName,
-                      contact: newSupplierContact,
-                      address: newSupplierAddress,
-                    });
-                    setNewSupplierName('');
-                    setNewSupplierContact('');
-                    setNewSupplierAddress('');
-                  }
-                }}
-                className="w-full py-2 bg-amber-800 text-white font-bold text-xs rounded-xl hover:bg-amber-900"
-              >
-                + Simpan Supplier
-              </button>
+              <div className="flex gap-2">
+                {editingSupplier && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingSupplier(null)}
+                    className="flex-1 py-2 bg-stone-100 text-stone-700 font-bold text-xs rounded-xl hover:bg-stone-200"
+                  >
+                    Batal
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    if (editingSupplier) {
+                      if (editingSupplier.name) {
+                        updateSupplier(editingSupplier.id, {
+                          name: editingSupplier.name,
+                          contact: editingSupplier.contact,
+                          address: editingSupplier.address,
+                        });
+                        setEditingSupplier(null);
+                      }
+                    } else if (newSupplierName) {
+                      addSupplier({
+                        name: newSupplierName,
+                        contact: newSupplierContact,
+                        address: newSupplierAddress,
+                      });
+                      setNewSupplierName('');
+                      setNewSupplierContact('');
+                      setNewSupplierAddress('');
+                    }
+                  }}
+                  className="flex-1 py-2 bg-amber-800 text-white font-bold text-xs rounded-xl hover:bg-amber-900"
+                >
+                  {editingSupplier ? 'Update Supplier' : '+ Simpan Supplier'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -550,6 +683,7 @@ export const IngredientsManager: React.FC = () => {
                   <th className="p-3.5">Nama Supplier</th>
                   <th className="p-3.5">Kontak</th>
                   <th className="p-3.5">Alamat</th>
+                  <th className="p-3.5 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
@@ -558,6 +692,28 @@ export const IngredientsManager: React.FC = () => {
                     <td className="p-3.5 font-bold text-stone-900">{s.name}</td>
                     <td className="p-3.5 text-stone-600 font-mono">{s.contact || '-'}</td>
                     <td className="p-3.5 text-stone-600">{s.address || '-'}</td>
+                    <td className="p-3.5 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => setEditingSupplier(s)}
+                          className="p-1.5 rounded-lg text-stone-600 hover:bg-stone-100 hover:text-amber-800"
+                          title="Edit Supplier"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Hapus supplier "${s.name}"?`)) {
+                              deleteSupplier(s.id);
+                            }
+                          }}
+                          className="p-1.5 rounded-lg text-stone-600 hover:bg-rose-50 hover:text-rose-600"
+                          title="Hapus Supplier"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

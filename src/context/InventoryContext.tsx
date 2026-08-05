@@ -504,18 +504,49 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           quantity: Number(rd.quantity) || 0,
         }));
 
-      const mainResults = await Promise.all([
-        supabase.from('ingredients').upsert(cleanIngs),
-        supabase.from('menus').upsert(cleanMenus),
-        supabase.from('recipes').upsert(cleanRecipes),
-        supabase.from('recipe_details').upsert(cleanRecipeDetails),
-      ]);
-      const mainErr = mainResults.find((r) => r.error)?.error;
-      if (mainErr) {
-        console.warn('Push ingredients/menus warning:', mainErr);
-        const isRls = mainErr.message?.toLowerCase().includes('security') || mainErr.message?.toLowerCase().includes('policy') || mainErr.code === '42501';
-        setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS). Klik "Fix Supabase" di kanan atas.' : (mainErr.message || 'Gagal push bahan baku/menu'));
-        return false;
+      // Step 2: Push ingredients and menus sequentially
+      if (cleanIngs.length > 0) {
+        const { error: ingErr } = await supabase.from('ingredients').upsert(cleanIngs);
+        if (ingErr) {
+          console.warn('Push ingredients warning:', ingErr);
+          const isRls = ingErr.message?.toLowerCase().includes('security') || ingErr.message?.toLowerCase().includes('policy') || ingErr.code === '42501';
+          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS Policy).' : (ingErr.message || 'Gagal push bahan baku'));
+          return false;
+        }
+      }
+
+      if (cleanMenus.length > 0) {
+        const { error: menuErr } = await supabase.from('menus').upsert(cleanMenus);
+        if (menuErr) {
+          console.warn('Push menus warning:', menuErr);
+          const isRls = menuErr.message?.toLowerCase().includes('security') || menuErr.message?.toLowerCase().includes('policy') || menuErr.code === '42501';
+          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS Policy).' : (menuErr.message || 'Gagal push menu'));
+          return false;
+        }
+      }
+
+      if (cleanRecipes.length > 0) {
+        const { error: recErr } = await supabase.from('recipes').upsert(cleanRecipes);
+        if (recErr) {
+          console.warn('Push recipes warning:', recErr);
+          const isRls = recErr.message?.toLowerCase().includes('security') || recErr.message?.toLowerCase().includes('policy') || recErr.code === '42501';
+          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS Policy).' : (recErr.message || 'Gagal push resep'));
+          return false;
+        }
+      }
+
+      if (cleanRecipeDetails.length > 0) {
+        let { error: rdErr } = await supabase.from('recipe_details').upsert(cleanRecipeDetails);
+        if (rdErr && rdErr.message?.includes('does not exist')) {
+          const res = await supabase.from('recipe_items').upsert(cleanRecipeDetails);
+          rdErr = res.error;
+        }
+        if (rdErr) {
+          console.warn('Push recipe details warning:', rdErr);
+          const isRls = rdErr.message?.toLowerCase().includes('security') || rdErr.message?.toLowerCase().includes('policy') || rdErr.code === '42501';
+          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS Policy).' : (rdErr.message || 'Gagal push detail resep'));
+          return false;
+        }
       }
 
       // Step 3: Explicitly update current_stock in Supabase table for every ingredient
@@ -571,17 +602,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (trxErr) {
           console.warn('Push transactions warning:', trxErr);
           const isRls = trxErr.message?.toLowerCase().includes('security') || trxErr.message?.toLowerCase().includes('policy') || trxErr.code === '42501';
-          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS). Klik "Fix Supabase" di kanan atas.' : (trxErr.message || 'Gagal push transaksi'));
+          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS Policy).' : (trxErr.message || 'Gagal push transaksi'));
           return false;
         }
       }
 
       if (cleanMovs.length > 0) {
-        const { error: movErr } = await supabase.from('stock_movements').upsert(cleanMovs);
+        let { error: movErr } = await supabase.from('stock_movements').upsert(cleanMovs);
+        if (movErr && movErr.message?.includes('does not exist')) {
+          const res = await supabase.from('stock_moved').upsert(cleanMovs);
+          movErr = res.error;
+        }
         if (movErr) {
           console.warn('Push stock movements warning:', movErr);
           const isRls = movErr.message?.toLowerCase().includes('security') || movErr.message?.toLowerCase().includes('policy') || movErr.code === '42501';
-          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS). Klik "Fix Supabase" di kanan atas.' : (movErr.message || 'Gagal push mutasi stok'));
+          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS Policy).' : (movErr.message || 'Gagal push mutasi stok'));
           return false;
         }
       }
@@ -645,43 +680,128 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Master Data Handlers
-  const addUnit = (unit: Omit<Unit, 'id'>) => {
+  const addUnit = async (unit: Omit<Unit, 'id'>) => {
     const newUnit = { id: `u-${Date.now()}`, ...unit };
     setUnits((prev) => [...prev, newUnit]);
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('units').upsert([newUnit]);
+      }
+    } catch (e) {
+      console.warn('Error upserting unit to Supabase:', e);
+    }
   };
 
-  const updateUnit = (id: string, unit: Omit<Unit, 'id'>) => {
-    setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, ...unit } : u)));
+  const updateUnit = async (id: string, unit: Omit<Unit, 'id'>) => {
+    const updated = { id, ...unit };
+    setUnits((prev) => prev.map((u) => (u.id === id ? updated : u)));
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('units').upsert([updated]);
+      }
+    } catch (e) {
+      console.warn('Error updating unit in Supabase:', e);
+    }
   };
 
-  const deleteUnit = (id: string) => {
+  const deleteUnit = async (id: string) => {
     setUnits((prev) => prev.filter((u) => u.id !== id));
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('units').delete().eq('id', id);
+      }
+    } catch (e) {
+      console.warn('Error deleting unit from Supabase:', e);
+    }
   };
 
-  const addCategory = (cat: Omit<Category, 'id'>) => {
+  const addCategory = async (cat: Omit<Category, 'id'>) => {
     const newCat = { id: `c-${Date.now()}`, ...cat };
     setCategories((prev) => [...prev, newCat]);
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('categories').upsert([newCat]);
+      }
+    } catch (e) {
+      console.warn('Error upserting category to Supabase:', e);
+    }
   };
 
-  const updateCategory = (id: string, cat: Omit<Category, 'id'>) => {
-    setCategories((prev) => prev.map((c) => (c.id === id ? { ...c, ...cat } : c)));
+  const updateCategory = async (id: string, cat: Omit<Category, 'id'>) => {
+    const updated = { id, ...cat };
+    setCategories((prev) => prev.map((c) => (c.id === id ? updated : c)));
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('categories').upsert([updated]);
+      }
+    } catch (e) {
+      console.warn('Error updating category in Supabase:', e);
+    }
   };
 
-  const deleteCategory = (id: string) => {
+  const deleteCategory = async (id: string) => {
     setCategories((prev) => prev.filter((c) => c.id !== id));
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('categories').delete().eq('id', id);
+      }
+    } catch (e) {
+      console.warn('Error deleting category from Supabase:', e);
+    }
   };
 
-  const addSupplier = (sup: Omit<Supplier, 'id'>) => {
+  const addSupplier = async (sup: Omit<Supplier, 'id'>) => {
     const newSup = { id: `s-${Date.now()}`, ...sup };
     setSuppliers((prev) => [...prev, newSup]);
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('suppliers').upsert([{
+          id: String(newSup.id),
+          name: String(newSup.name),
+          contact: newSup.contact || null,
+          address: newSup.address || null,
+        }]);
+      }
+    } catch (e) {
+      console.warn('Error upserting supplier to Supabase:', e);
+    }
   };
 
-  const updateSupplier = (id: string, sup: Omit<Supplier, 'id'>) => {
-    setSuppliers((prev) => prev.map((s) => (s.id === id ? { ...s, ...sup } : s)));
+  const updateSupplier = async (id: string, sup: Omit<Supplier, 'id'>) => {
+    const updated = { id, ...sup };
+    setSuppliers((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('suppliers').upsert([{
+          id: String(id),
+          name: String(sup.name),
+          contact: sup.contact || null,
+          address: sup.address || null,
+        }]);
+      }
+    } catch (e) {
+      console.warn('Error updating supplier in Supabase:', e);
+    }
   };
 
-  const deleteSupplier = (id: string) => {
+  const deleteSupplier = async (id: string) => {
     setSuppliers((prev) => prev.filter((s) => s.id !== id));
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('suppliers').delete().eq('id', id);
+      }
+    } catch (e) {
+      console.warn('Error deleting supplier from Supabase:', e);
+    }
   };
 
   const addIngredient = (ingData: Omit<Ingredient, 'id' | 'current_stock'> & { initial_stock?: number }) => {
@@ -762,16 +882,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
-  const addMenu = (menuData: Omit<Menu, 'id'>) => {
+  const addMenu = async (menuData: Omit<Menu, 'id'>) => {
     const newMenu: Menu = {
       id: `m-${Date.now()}`,
       ...menuData,
       is_active: menuData.is_active ?? true,
       active_recipe_version: 1,
     };
-    setMenus((prev) => [...prev, newMenu]);
-
-    // Create default v1 recipe for menu
     const defaultRec: Recipe = {
       id: `rec-${Date.now()}`,
       menu_id: newMenu.id,
@@ -780,19 +897,88 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       notes: 'Resep Versi 1 (Awal)',
       created_at: new Date().toISOString(),
     };
+    setMenus((prev) => [...prev, newMenu]);
     setRecipes((prev) => [...prev, defaultRec]);
+
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('menus').upsert([{
+          id: String(newMenu.id),
+          name: String(newMenu.name),
+          category: String(newMenu.category || 'Umum'),
+          price: Number(newMenu.price) || 0,
+          is_active: newMenu.is_active ?? true,
+        }]);
+        await supabase.from('recipes').upsert([{
+          id: String(defaultRec.id),
+          menu_id: String(defaultRec.menu_id),
+          version: Number(defaultRec.version) || 1,
+          is_active: true,
+          notes: defaultRec.notes,
+          created_at: defaultRec.created_at,
+        }]);
+      }
+    } catch (e) {
+      console.warn('Error saving menu to Supabase:', e);
+    }
   };
 
-  const updateMenu = (id: string, menu: Partial<Menu>) => {
-    setMenus((prev) => prev.map((m) => (m.id === id ? { ...m, ...menu } : m)));
+  const updateMenu = async (id: string, menu: Partial<Menu>) => {
+    let updatedMenuObj: Menu | undefined;
+    setMenus((prev) =>
+      prev.map((m) => {
+        if (m.id === id) {
+          updatedMenuObj = { ...m, ...menu };
+          return updatedMenuObj;
+        }
+        return m;
+      })
+    );
+    try {
+      const supabase = getSupabase();
+      if (supabase && updatedMenuObj) {
+        await supabase.from('menus').upsert([{
+          id: String(updatedMenuObj.id),
+          name: String(updatedMenuObj.name),
+          category: String(updatedMenuObj.category || 'Umum'),
+          price: Number(updatedMenuObj.price) || 0,
+          is_active: updatedMenuObj.is_active ?? true,
+        }]);
+      }
+    } catch (e) {
+      console.warn('Error updating menu in Supabase:', e);
+    }
   };
 
-  const deleteMenu = (id: string) => {
+  const deleteMenu = async (id: string) => {
+    const relatedRecipes = recipes.filter((r) => r.menu_id === id);
+    const relatedRecipeIds = relatedRecipes.map((r) => r.id);
+
     setMenus((prev) => prev.filter((m) => m.id !== id));
+    setRecipes((prev) => prev.filter((r) => r.menu_id !== id));
+    setRecipeDetails((prev) => prev.filter((rd) => !relatedRecipeIds.includes(rd.recipe_id)));
+
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        // Delete recipe details first, then recipes, then menu
+        for (const recId of relatedRecipeIds) {
+          const { error: rdErr } = await supabase.from('recipe_details').delete().eq('recipe_id', recId);
+          if (rdErr && rdErr.message?.includes('does not exist')) {
+            await supabase.from('recipe_items').delete().eq('recipe_id', recId);
+          }
+        }
+        await supabase.from('recipes').delete().eq('menu_id', id);
+        await supabase.from('menus').delete().eq('id', id);
+      }
+    } catch (e) {
+      console.warn('Error deleting menu from Supabase:', e);
+    }
   };
 
   // Recipe Handlers
-  const addRecipeVersion = (
+  const addRecipeVersion = async (
     menuId: string,
     notes: string,
     details: Array<{ ingredient_id: string; quantity: number }>
@@ -801,9 +987,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const newVersion = menuRecipes.length > 0 ? Math.max(...menuRecipes.map((r) => r.version)) + 1 : 1;
 
     // Deactivate old recipes
-    setRecipes((prev) =>
-      prev.map((r) => (r.menu_id === menuId ? { ...r, is_active: false } : r))
-    );
+    const updatedRecipes = recipes.map((r) => (r.menu_id === menuId ? { ...r, is_active: false } : r));
 
     const newRecipe: Recipe = {
       id: `rec-${Date.now()}`,
@@ -814,8 +998,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       created_at: new Date().toISOString(),
     };
 
-    setRecipes((prev) => [...prev, newRecipe]);
-
     // Create details
     const newDetails: RecipeDetail[] = details.map((d, index) => ({
       id: `rd-${Date.now()}-${index}`,
@@ -824,12 +1006,53 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       quantity: Number(d.quantity),
     }));
 
+    setRecipes([...updatedRecipes, newRecipe]);
     setRecipeDetails((prev) => [...prev, ...newDetails]);
-
-    // Update menu active version
     setMenus((prev) =>
       prev.map((m) => (m.id === menuId ? { ...m, active_recipe_version: newVersion } : m))
     );
+
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        // Ensure menu exists in Supabase
+        const targetMenu = menus.find((m) => m.id === menuId);
+        if (targetMenu) {
+          await supabase.from('menus').upsert([{
+            id: String(targetMenu.id),
+            name: String(targetMenu.name),
+            category: String(targetMenu.category || 'Umum'),
+            price: Number(targetMenu.price) || 0,
+            is_active: targetMenu.is_active ?? true,
+          }]);
+        }
+
+        // Upsert new recipe
+        await supabase.from('recipes').upsert([{
+          id: String(newRecipe.id),
+          menu_id: String(newRecipe.menu_id),
+          version: Number(newRecipe.version),
+          is_active: true,
+          notes: newRecipe.notes,
+          created_at: newRecipe.created_at,
+        }]);
+
+        // Upsert details
+        const cleanDetails = newDetails.map((rd) => ({
+          id: String(rd.id),
+          recipe_id: String(rd.recipe_id),
+          ingredient_id: String(rd.ingredient_id),
+          quantity: Number(rd.quantity) || 0,
+        }));
+
+        const { error: rdErr } = await supabase.from('recipe_details').upsert(cleanDetails);
+        if (rdErr && rdErr.message?.includes('does not exist')) {
+          await supabase.from('recipe_items').upsert(cleanDetails);
+        }
+      }
+    } catch (e) {
+      console.warn('Error saving recipe version to Supabase:', e);
+    }
   };
 
   const setActiveRecipeVersion = (menuId: string, version: number) => {

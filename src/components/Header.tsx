@@ -156,15 +156,6 @@ ALTER TABLE public.suppliers DISABLE ROW LEVEL SECURITY;
               {isSyncing ? 'Syncing...' : supabaseError ? 'Sync Error' : 'Supabase Active'}
             </span>
           </button>
-
-          <button
-            onClick={() => setShowRlsModal(true)}
-            className="p-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-md text-xs flex items-center gap-1 transition-colors"
-            title="Petunjuk Supabase Fix (RLS Policy)"
-          >
-            <Database className="w-3.5 h-3.5 text-amber-600" />
-            <span className="hidden xl:inline text-[11px] font-medium">Fix Supabase</span>
-          </button>
         </div>
 
         {/* Critical Stock Alert Badge */}
