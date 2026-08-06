@@ -179,7 +179,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onOpenQuickAct
                 <tbody className="text-xs divide-y divide-slate-100">
                   {criticalItems.map((item) => {
                     const unit = units.find((u) => u.id === item.unit_id);
-                    const isZero = item.current_stock <= 0;
+                    const isNegative = item.current_stock < 0;
+                    const isZero = item.current_stock === 0;
                     return (
                       <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="px-4 py-3 font-mono text-slate-600 font-semibold">{item.code}</td>
@@ -195,14 +196,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onOpenQuickAct
                             {item.type === 'raw' ? 'Raw Material' : 'Prepared (PP)'}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-red-600">
+                        <td className={`px-4 py-3 text-right font-mono font-extrabold ${item.current_stock < 0 ? 'text-red-600' : 'text-slate-900'}`}>
                           {formatNumber(item.current_stock)} {unit?.abbreviation}
                         </td>
                         <td className="px-4 py-3 text-right font-mono text-slate-500">
                           {formatNumber(item.min_stock)} {unit?.abbreviation}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {isZero ? (
+                          {isNegative ? (
+                            <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-extrabold tracking-tight">
+                              STOK MINUS
+                            </span>
+                          ) : isZero ? (
                             <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-bold tracking-tight">
                               OUT OF STOCK
                             </span>

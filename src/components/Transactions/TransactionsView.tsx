@@ -41,12 +41,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
     checkProductionSufficiency,
     addProductionTransaction,
     addAdjustmentTransaction,
+    getPrepareFormula,
+    savePrepareFormula,
   } = useInventory();
 
   // Active Tab: History vs New Transaction Forms
   const [activeTab, setActiveTab] = useState<'purchase' | 'prepare' | 'production' | 'adjustment' | 'history'>(
     initialAction || 'production'
   );
+
+  const [historyTypeFilter, setHistoryTypeFilter] = useState<'all' | 'purchase' | 'prepare' | 'production' | 'adjustment'>('all');
 
   useEffect(() => {
     if (initialAction) {
@@ -66,13 +70,59 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   ]);
 
   // 2. Prepare Form State
+  const preparedIngredients = ingredients.filter((i) => i.type === 'prepared');
   const [prepDate, setPrepDate] = useState(new Date().toISOString().slice(0, 10));
   const [prepRefNo, setPrepRefNo] = useState(generateRefNo('PREP'));
   const [prepNotes, setPrepNotes] = useState('');
+  const [prepTargetIngId, setPrepTargetIngId] = useState<string>(preparedIngredients[0]?.id || ingredients[0]?.id || '');
+  const [prepTargetQty, setPrepTargetQty] = useState<number>(1000);
   const [prepItems, setPrepItems] = useState<PrepareItemInput[]>([
-    { ingredient_id: ingredients.find((i) => i.type === 'raw')?.id || '', quantity: 2000, is_target: false },
-    { ingredient_id: ingredients.find((i) => i.type === 'prepared')?.id || '', quantity: 2200, is_target: true },
+    { ingredient_id: preparedIngredients[0]?.id || ingredients[0]?.id || '', quantity: 1000, is_target: true },
   ]);
+
+  // Load / Sync Prepare Formula Template when Target PP or Qty Changes
+  useEffect(() => {
+    if (!prepTargetIngId) return;
+    const { details } = getPrepareFormula(prepTargetIngId);
+
+    if (details && details.length > 0) {
+      const scaleFactor = prepTargetQty > 0 ? prepTargetQty / 1000 : 1;
+      const sourceItems: PrepareItemInput[] = details.map((d) => ({
+        ingredient_id: d.ingredient_id,
+        quantity: Math.round(Number(d.quantity) * scaleFactor * 100) / 100,
+        is_target: false,
+      }));
+      setPrepItems([
+        { ingredient_id: prepTargetIngId, quantity: prepTargetQty, is_target: true },
+        ...sourceItems,
+      ]);
+    } else {
+      const defaultRaw = ingredients.find((i) => i.type === 'raw');
+      setPrepItems([
+        { ingredient_id: prepTargetIngId, quantity: prepTargetQty, is_target: true },
+        ...(defaultRaw ? [{ ingredient_id: defaultRaw.id, quantity: prepTargetQty, is_target: false }] : []),
+      ]);
+    }
+  }, [prepTargetIngId, prepTargetQty]);
+
+  const handleSavePrepareFormula = () => {
+    if (!prepTargetIngId) return;
+    const sourceItems = prepItems.filter((i) => !i.is_target && i.ingredient_id && i.quantity > 0);
+    if (sourceItems.length === 0) {
+      alert('Pilih minimal 1 bahan mentah pendukung untuk disimpan dalam formula!');
+      return;
+    }
+
+    const scaleFactor = prepTargetQty > 0 ? prepTargetQty / 1000 : 1;
+    const formulaDetails = sourceItems.map((item) => ({
+      ingredient_id: item.ingredient_id,
+      quantity: scaleFactor > 0 ? item.quantity / scaleFactor : item.quantity,
+    }));
+
+    const targetIng = ingredients.find((i) => i.id === prepTargetIngId);
+    savePrepareFormula(prepTargetIngId, formulaDetails);
+    alert(`Formula resep standar untuk "${targetIng?.name || 'Bahan Prepare'}" berhasil disimpan! Setiap kali Anda memilih bahan ini, komposisinya akan terisi otomatis.`);
+  };
 
   // 3. Production Form State
   const [prodDate, setProdDate] = useState(new Date().toISOString().slice(0, 10));
@@ -401,7 +451,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
             <div>
               <h3 className="font-bold text-stone-900 text-base font-serif">Proses Prepare / Konversi Bahan</h3>
               <p className="text-xs text-stone-500">
-                Mengubah bahan mentah (Stok berkurang) menjadi bahan setengah jadi/PP (Stok bertambah)
+                Pilih bahan setengah jadi (PP) & target jumlah diproduksi. Komposisi resep akan terisi otomatis dan dapat disesuaikan.
               </p>
             </div>
           </div>
@@ -440,26 +490,88 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
               </div>
             </div>
 
-            {/* Prepare Items Selector */}
+            {/* Target Prepared Item Selection */}
+            <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-blue-700" /> Target Bahan Setengah Jadi (PP) Yang Diproduksi
+                </span>
+                <span className="text-[11px] font-medium text-blue-700">Auto-fill dari formula resep PP</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="md:col-span-2">
+                  <label className="block text-[11px] font-semibold text-stone-600 mb-1">Pilih Bahan PP</label>
+                  <select
+                    value={prepTargetIngId}
+                    onChange={(e) => setPrepTargetIngId(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-bold text-stone-900 rounded-xl bg-white border border-stone-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {ingredients
+                      .filter((i) => i.type === 'prepared' || i.is_active)
+                      .map((i) => {
+                        const unit = units.find((u) => u.id === i.unit_id);
+                        return (
+                          <option key={i.id} value={i.id}>
+                            [{i.type === 'raw' ? 'Mentah' : 'PP Prepare'}] {i.name} (Stok Saat Ini: {formatNumber(i.current_stock)} {unit?.abbreviation || ''})
+                          </option>
+                        );
+                      })}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-stone-600 mb-1">Jumlah Hasil Diproduksi</label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      step="any"
+                      required
+                      min="1"
+                      value={prepTargetQty}
+                      onChange={(e) => setPrepTargetQty(Number(e.target.value) || 0)}
+                      className="w-full px-3 py-2 text-xs font-mono font-bold text-stone-900 rounded-xl bg-white border border-stone-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <span className="text-xs font-bold text-stone-600 min-w-12">
+                      {units.find((u) => u.id === ingredients.find((i) => i.id === prepTargetIngId)?.unit_id)?.abbreviation || 'Unit'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Prepare Source Ingredients List */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-stone-900">Komposisi Bahan Konversi (Masuk & Keluar)</h4>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPrepItems([
-                      ...prepItems,
-                      {
-                        ingredient_id: ingredients[0]?.id || '',
-                        quantity: 100,
-                        is_target: false,
-                      },
-                    ])
-                  }
-                  className="text-xs font-bold text-blue-700 hover:underline flex items-center gap-1"
-                >
-                  <Plus className="w-3.5 h-3.5" /> + Tambah Baris Bahan
-                </button>
+                <div>
+                  <h4 className="text-xs font-bold text-stone-900">Komposisi Bahan Mentah Yang Digunakan</h4>
+                  <p className="text-[11px] text-stone-500">Anda dapat mengubah jenis bahan atau jumlahnya di bawah ini</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSavePrepareFormula}
+                    className="px-3 py-1.5 rounded-xl bg-blue-100 hover:bg-blue-200 text-blue-900 text-xs font-bold transition-all flex items-center gap-1 border border-blue-300"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-blue-700" /> Simpan Formula Standar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPrepItems([
+                        ...prepItems,
+                        {
+                          ingredient_id: ingredients.find((i) => i.type === 'raw')?.id || ingredients[0]?.id || '',
+                          quantity: 100,
+                          is_target: false,
+                        },
+                      ])
+                    }
+                    className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold transition-all flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> + Tambah Bahan
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -467,27 +579,18 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                   const ing = ingredients.find((i) => i.id === item.ingredient_id);
                   const unit = units.find((u) => u.id === ing?.unit_id);
 
+                  if (item.is_target) return null; // Target row shown in top header
+
+                  const isStockNegative = ing && ing.current_stock < 0;
+
                   return (
                     <div
                       key={idx}
                       className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-stone-50 border border-stone-200"
                     >
-                      <select
-                        value={item.is_target ? 'target' : 'source'}
-                        onChange={(e) => {
-                          const newItems = [...prepItems];
-                          newItems[idx].is_target = e.target.value === 'target';
-                          setPrepItems(newItems);
-                        }}
-                        className={`px-3 py-2 text-xs font-extrabold rounded-lg border ${
-                          item.is_target
-                            ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                            : 'bg-rose-100 text-rose-900 border-rose-300'
-                        }`}
-                      >
-                        <option value="source">Keluar (-) Bahan Mentah</option>
-                        <option value="target">Masuk (+) Hasil Prepare (PP)</option>
-                      </select>
+                      <span className="px-2.5 py-1 text-[10px] font-extrabold rounded-lg bg-rose-100 text-rose-900 border border-rose-300">
+                        Keluar (-) Bahan Mentah
+                      </span>
 
                       <select
                         value={item.ingredient_id}
@@ -522,6 +625,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                         <span className="text-xs font-bold text-stone-500">{unit?.abbreviation}</span>
                       </div>
 
+                      <div className="text-right min-w-28 text-[11px]">
+                        <span className="block text-stone-400">Sisa Stok:</span>
+                        <span className={`font-mono font-bold ${isStockNegative ? 'text-red-600 font-extrabold' : 'text-stone-700'}`}>
+                          {ing ? formatNumber(ing.current_stock) : 0} {unit?.abbreviation || ''}
+                        </span>
+                      </div>
+
                       <button
                         type="button"
                         onClick={() => setPrepItems(prepItems.filter((_, i) => i !== idx))}
@@ -537,9 +647,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
             <button
               type="submit"
-              className="w-full py-2.5 rounded-xl bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs shadow-md"
+              className="w-full py-3 rounded-xl bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2"
             >
-              Simpan Transaksi Prepare
+              <ChefHat className="w-4 h-4" /> Simpan Transaksi Prepare & Potong Stok
             </button>
           </form>
         </div>
@@ -922,9 +1032,68 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
       {/* HISTORY TABLE */}
       {activeTab === 'history' && (
         <div className="bg-white rounded-2xl border border-stone-200 shadow-xs overflow-hidden">
-          <div className="p-4 border-b border-stone-100 flex items-center justify-between">
-            <h3 className="font-bold text-stone-900 text-sm font-serif">Riwayat Semua Transaksi Inventaris</h3>
-            <span className="text-xs text-stone-500 font-medium">Total: {transactions.length} transaksi</span>
+          <div className="p-4 border-b border-stone-100 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-bold text-stone-900 text-sm font-serif">Riwayat Transaksi Inventaris</h3>
+              <p className="text-xs text-stone-500">Filter transaksi berdasarkan jenis untuk mempermudah audit</p>
+            </div>
+            <span className="text-xs text-stone-500 font-bold bg-stone-100 px-3 py-1 rounded-full">
+              Menampilkan {transactions.filter((t) => historyTypeFilter === 'all' || t.type === historyTypeFilter).length} dari {transactions.length} transaksi
+            </span>
+          </div>
+
+          {/* History Sub-tabs Filter Bar */}
+          <div className="flex flex-wrap items-center gap-2 p-3 bg-stone-50/70 border-b border-stone-200">
+            <button
+              onClick={() => setHistoryTypeFilter('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                historyTypeFilter === 'all'
+                  ? 'bg-stone-900 text-white shadow-xs'
+                  : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
+              }`}
+            >
+              Semua ({transactions.length})
+            </button>
+            <button
+              onClick={() => setHistoryTypeFilter('purchase')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                historyTypeFilter === 'purchase'
+                  ? 'bg-emerald-800 text-white shadow-xs'
+                  : 'bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-200'
+              }`}
+            >
+              🛒 Pembelian ({transactions.filter((t) => t.type === 'purchase').length})
+            </button>
+            <button
+              onClick={() => setHistoryTypeFilter('prepare')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                historyTypeFilter === 'prepare'
+                  ? 'bg-blue-800 text-white shadow-xs'
+                  : 'bg-white text-blue-800 hover:bg-blue-50 border border-blue-200'
+              }`}
+            >
+              🍳 Prepare ({transactions.filter((t) => t.type === 'prepare').length})
+            </button>
+            <button
+              onClick={() => setHistoryTypeFilter('production')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                historyTypeFilter === 'production'
+                  ? 'bg-amber-800 text-white shadow-xs'
+                  : 'bg-white text-amber-800 hover:bg-amber-50 border border-amber-200'
+              }`}
+            >
+              🍲 Produksi Menu ({transactions.filter((t) => t.type === 'production').length})
+            </button>
+            <button
+              onClick={() => setHistoryTypeFilter('adjustment')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                historyTypeFilter === 'adjustment'
+                  ? 'bg-purple-800 text-white shadow-xs'
+                  : 'bg-white text-purple-800 hover:bg-purple-50 border border-purple-200'
+              }`}
+            >
+              ⚖️ Penyesuaian ({transactions.filter((t) => t.type === 'adjustment').length})
+            </button>
           </div>
 
           <div className="overflow-x-auto">
@@ -939,43 +1108,45 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {transactions.map((trx) => {
-                  const typeLabel = {
-                    purchase: 'Pembelian',
-                    prepare: 'Prepare',
-                    production: 'Produksi / Penjualan',
-                    adjustment: 'Penyesuaian',
-                  }[trx.type];
+                {transactions
+                  .filter((t) => historyTypeFilter === 'all' || t.type === historyTypeFilter)
+                  .map((trx) => {
+                    const typeLabel = {
+                      purchase: 'Pembelian',
+                      prepare: 'Prepare',
+                      production: 'Produksi / Penjualan',
+                      adjustment: 'Penyesuaian',
+                    }[trx.type];
 
-                  const badgeClass = {
-                    purchase: 'bg-emerald-100 text-emerald-800',
-                    prepare: 'bg-blue-100 text-blue-800',
-                    production: 'bg-amber-100 text-amber-800',
-                    adjustment: 'bg-purple-100 text-purple-800',
-                  }[trx.type];
+                    const badgeClass = {
+                      purchase: 'bg-emerald-100 text-emerald-800',
+                      prepare: 'bg-blue-100 text-blue-800',
+                      production: 'bg-amber-100 text-amber-800',
+                      adjustment: 'bg-purple-100 text-purple-800',
+                    }[trx.type];
 
-                  let detailText = trx.notes || '-';
-                  if (trx.type === 'production' && trx.menu_id) {
-                    const menu = menus.find((m) => m.id === trx.menu_id);
-                    detailText = `Penjualan / Produksi ${trx.portion_count || 1} porsi ${menu ? menu.name : 'Menu'} ${trx.notes ? `(${trx.notes})` : ''}`;
-                  } else if (trx.type === 'adjustment' && trx.adjustment_reason) {
-                    detailText = `Penyesuaian (${trx.adjustment_reason}) ${trx.notes ? `- ${trx.notes}` : ''}`;
-                  }
+                    let detailText = trx.notes || '-';
+                    if (trx.type === 'production' && trx.menu_id) {
+                      const menu = menus.find((m) => m.id === trx.menu_id);
+                      detailText = `Penjualan / Produksi ${trx.portion_count || 1} porsi ${menu ? menu.name : 'Menu'} ${trx.notes ? `(${trx.notes})` : ''}`;
+                    } else if (trx.type === 'adjustment' && trx.adjustment_reason) {
+                      detailText = `Penyesuaian (${trx.adjustment_reason}) ${trx.notes ? `- ${trx.notes}` : ''}`;
+                    }
 
-                  return (
-                    <tr key={trx.id} className="hover:bg-stone-50">
-                      <td className="p-3.5 text-stone-600">{formatDate(trx.transaction_date, true)}</td>
-                      <td className="p-3.5 font-mono font-bold text-stone-800">{trx.reference_no}</td>
-                      <td className="p-3.5">
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${badgeClass}`}>
-                          {typeLabel}
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-stone-700 font-medium">{detailText}</td>
-                      <td className="p-3.5 text-stone-600 font-medium">{trx.created_by}</td>
-                    </tr>
-                  );
-                })}
+                    return (
+                      <tr key={trx.id} className="hover:bg-stone-50">
+                        <td className="p-3.5 text-stone-600">{formatDate(trx.transaction_date, true)}</td>
+                        <td className="p-3.5 font-mono font-bold text-stone-800">{trx.reference_no}</td>
+                        <td className="p-3.5">
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${badgeClass}`}>
+                            {typeLabel}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-stone-700 font-medium">{detailText}</td>
+                        <td className="p-3.5 text-stone-600 font-medium">{trx.created_by}</td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>

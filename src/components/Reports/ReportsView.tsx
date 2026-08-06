@@ -183,7 +183,7 @@ export const ReportsView: React.FC = () => {
                         {row.in_adjustment - row.out_adjustment >= 0 ? '+' : ''}
                         {formatNumber(row.in_adjustment - row.out_adjustment)}
                       </td>
-                      <td className="p-3 text-right font-extrabold text-stone-900 bg-stone-50">
+                      <td className={`p-3 text-right font-extrabold ${row.final_stock < 0 ? 'text-red-600 bg-rose-50 font-mono' : 'text-stone-900 bg-stone-50'}`}>
                         {formatNumber(row.final_stock)}
                       </td>
                     </tr>
@@ -293,7 +293,7 @@ export const ReportsView: React.FC = () => {
                           {m.type === 'in' ? '+' : '-'}
                           {formatNumber(m.quantity)} {selectedUnit.abbreviation}
                         </td>
-                        <td className="p-3.5 text-right font-bold text-stone-900">
+                        <td className={`p-3.5 text-right font-extrabold ${m.balance_after < 0 ? 'text-red-600 font-mono' : 'text-stone-900'}`}>
                           {formatNumber(m.balance_after)} {selectedUnit.abbreviation}
                         </td>
                         <td className="p-3.5 font-sans text-stone-700">{m.description}</td>

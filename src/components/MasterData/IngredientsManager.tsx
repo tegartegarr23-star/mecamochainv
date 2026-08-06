@@ -327,7 +327,9 @@ export const IngredientsManager: React.FC = () => {
                           <td className="p-3.5 text-right font-mono font-bold">
                             <span
                               className={`px-2 py-1 rounded-lg ${
-                                isLowStock
+                                ing.current_stock < 0
+                                  ? 'bg-red-100 text-red-700 font-extrabold border border-red-200'
+                                  : isLowStock
                                   ? 'bg-rose-100 text-rose-700 font-extrabold'
                                   : 'text-stone-900'
                               }`}
@@ -339,7 +341,11 @@ export const IngredientsManager: React.FC = () => {
                             {formatCurrency(ing.cost_per_unit || 0)}
                           </td>
                           <td className="p-3.5 text-center">
-                            {isLowStock ? (
+                            {ing.current_stock < 0 ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-800 text-[10px] font-extrabold border border-red-200">
+                                <AlertTriangle className="w-3 h-3" /> Stok Minus
+                              </span>
+                            ) : isLowStock ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-bold">
                                 <AlertTriangle className="w-3 h-3" /> Stok Kritis
                               </span>

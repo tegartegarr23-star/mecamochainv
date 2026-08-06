@@ -83,6 +83,8 @@ interface InventoryContextType {
   addRecipeVersion: (menuId: string, notes: string, details: Array<{ ingredient_id: string; quantity: number }>) => void;
   setActiveRecipeVersion: (menuId: string, version: number) => void;
   getMenuRecipeDetails: (menuId: string, version?: number) => { recipe?: Recipe; details: Array<RecipeDetail & { ingredient?: Ingredient; unit?: Unit }> };
+  getPrepareFormula: (prepIngredientId: string) => { recipe?: Recipe; details: Array<RecipeDetail & { ingredient?: Ingredient; unit?: Unit }> };
+  savePrepareFormula: (prepIngredientId: string, details: Array<{ ingredient_id: string; quantity: number }>) => void;
 
   // Transactions & Stock Movements
   transactions: Transaction[];
@@ -373,29 +375,40 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (sbRecipes && sbRecipes.length > 0) setRecipes((prev) => mergeByField(prev, sbRecipes, 'id'));
       if (recipeDetailsData && recipeDetailsData.length > 0) {
         setRecipeDetails((prev) => {
-          const merged = sanitizeRecipeDetails(mergeByField(prev, recipeDetailsData, 'id'));
-          const recipeGroups = new Map<string, RecipeDetail[]>();
-          for (const rd of merged) {
-            if (rd && rd.recipe_id) {
-              const list = recipeGroups.get(rd.recipe_id) || [];
-              list.push(rd);
-              recipeGroups.set(rd.recipe_id, list);
+          const combined = sanitizeRecipeDetails(mergeByField(prev, recipeDetailsData, 'id'));
+          
+          // Identify menus/recipes that have user-saved details (rd-rec-...)
+          const userSavedRecipeIds = new Set<string>();
+          const userSavedMenuIds = new Set<string>();
+
+          for (const rd of combined) {
+            if (rd && rd.id && rd.id.startsWith('rd-rec-')) {
+              if (rd.recipe_id) userSavedRecipeIds.add(rd.recipe_id);
+              const parts = rd.id.split('-');
+              if (parts.length >= 3) {
+                userSavedMenuIds.add(parts[2]);
+              }
             }
           }
 
-          const cleanedList: RecipeDetail[] = [];
-          for (const [, group] of recipeGroups.entries()) {
-            const userSaved = group.filter((rd) => rd.id && rd.id.startsWith('rd-rec-'));
-            const targetGroup = userSaved.length > 0 ? userSaved : group;
-            const ingMap = new Map<string, RecipeDetail>();
-            for (const item of targetGroup) {
-              if (item && item.ingredient_id) {
-                ingMap.set(item.ingredient_id, item);
-              }
+          // Filter out legacy non-user-saved items for recipes/menus that have user-saved details
+          const filtered = combined.filter((rd) => {
+            if (!rd || !rd.recipe_id) return false;
+            const isUserSaved = rd.id && rd.id.startsWith('rd-rec-');
+            if (isUserSaved) return true;
+
+            const belongsToUserSavedRecipe = userSavedRecipeIds.has(rd.recipe_id);
+            const belongsToUserSavedMenu = Array.from(userSavedMenuIds).some(
+              (mId) => rd.recipe_id.includes(mId) || rd.id.includes(mId)
+            );
+
+            if (belongsToUserSavedRecipe || belongsToUserSavedMenu) {
+              return false; // Discard stale seed items when user has saved custom details!
             }
-            cleanedList.push(...Array.from(ingMap.values()));
-          }
-          return cleanedList;
+            return true;
+          });
+
+          return filtered;
         });
       }
 
@@ -598,7 +611,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       if (cleanRecipeDetails.length > 0) {
         let { error: rdErr } = await supabase.from('recipe_details').upsert(cleanRecipeDetails);
-        await supabase.from('recipe_items').upsert(cleanRecipeDetails).catch(() => {});
+        try { await supabase.from('recipe_items').upsert(cleanRecipeDetails); } catch {}
         if (rdErr && rdErr.message?.includes('does not exist')) {
           const res = await supabase.from('recipe_items').upsert(cleanRecipeDetails);
           rdErr = res.error;
@@ -668,7 +681,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       if (cleanMovs.length > 0) {
         let { error: movErr } = await supabase.from('stock_movements').upsert(cleanMovs);
-        await supabase.from('stock_moved').upsert(cleanMovs).catch(() => {});
+        try { await supabase.from('stock_moved').upsert(cleanMovs); } catch {}
         if (movErr && movErr.message?.includes('does not exist')) {
           const res = await supabase.from('stock_moved').upsert(cleanMovs);
           movErr = res.error;
@@ -1168,8 +1181,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
 
         // Delete old details in Supabase first to clear removed items
-        await supabase.from('recipe_details').delete().eq('recipe_id', recipeId).catch(() => {});
-        await supabase.from('recipe_items').delete().eq('recipe_id', recipeId).catch(() => {});
+        try { await supabase.from('recipe_details').delete().eq('recipe_id', recipeId); } catch {}
+        try { await supabase.from('recipe_items').delete().eq('recipe_id', recipeId); } catch {}
 
         // Upsert new details to BOTH recipe_details AND recipe_items
         const cleanDetails = newDetails.map((rd) => ({
@@ -1179,8 +1192,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           quantity: Number(rd.quantity) || 0,
         }));
 
-        await supabase.from('recipe_details').upsert(cleanDetails).catch(() => {});
-        await supabase.from('recipe_items').upsert(cleanDetails).catch(() => {});
+        try { await supabase.from('recipe_details').upsert(cleanDetails); } catch {}
+        try { await supabase.from('recipe_items').upsert(cleanDetails); } catch {}
       }
     } catch (e) {
       console.warn('Error saving recipe to Supabase:', e);
@@ -1243,6 +1256,106 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     });
 
     return { recipe, details };
+  };
+
+  const getPrepareFormula = (prepIngredientId: string) => {
+    const canonicalRecipeId = `rec-prep-${prepIngredientId}`;
+    let recipe = recipes.find((r) => r.menu_id === prepIngredientId || r.id === canonicalRecipeId);
+
+    if (!recipe) {
+      recipe = {
+        id: canonicalRecipeId,
+        menu_id: prepIngredientId,
+        version: 1,
+        is_active: true,
+        notes: `Formula Prepare ${prepIngredientId}`,
+        created_at: new Date().toISOString(),
+      };
+    }
+
+    const possibleRecipeIds = new Set<string>([
+      recipe.id,
+      canonicalRecipeId,
+      prepIngredientId,
+    ]);
+
+    const rawDetails = recipeDetails.filter((rd) => rd && rd.recipe_id && possibleRecipeIds.has(rd.recipe_id));
+
+    const details = rawDetails.map((rd) => {
+      const ing = ingredients.find((i) => i.id === rd.ingredient_id);
+      const unit = units.find((u) => u.id === ing?.unit_id);
+      return {
+        ...rd,
+        ingredient: ing,
+        unit: unit,
+      };
+    });
+
+    return { recipe, details };
+  };
+
+  const savePrepareFormula = async (
+    prepIngredientId: string,
+    details: Array<{ ingredient_id: string; quantity: number }>
+  ) => {
+    const canonicalRecipeId = `rec-prep-${prepIngredientId}`;
+    const recipeObj: Recipe = {
+      id: canonicalRecipeId,
+      menu_id: prepIngredientId,
+      version: 1,
+      is_active: true,
+      notes: `Formula Prepare Standard ${prepIngredientId}`,
+      created_at: new Date().toISOString(),
+    };
+
+    const uniqueDetailsMap = new Map<string, number>();
+    for (const d of details) {
+      if (d.ingredient_id && Number(d.quantity) > 0) {
+        uniqueDetailsMap.set(d.ingredient_id, Number(d.quantity));
+      }
+    }
+
+    const newDetails: RecipeDetail[] = Array.from(uniqueDetailsMap.entries()).map(([ingId, qty]) => ({
+      id: `rd-rec-prep-${prepIngredientId}-${ingId}`,
+      recipe_id: canonicalRecipeId,
+      ingredient_id: ingId,
+      quantity: qty,
+    }));
+
+    setRecipes((prev) => [
+      ...prev.filter((r) => r.menu_id !== prepIngredientId && r.id !== canonicalRecipeId),
+      recipeObj,
+    ]);
+
+    setRecipeDetails((prev) => [
+      ...prev.filter((rd) => rd && rd.recipe_id !== canonicalRecipeId && !rd.id?.includes(`rec-prep-${prepIngredientId}`)),
+      ...newDetails,
+    ]);
+
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        await supabase.from('recipes').upsert([{
+          id: String(recipeObj.id),
+          menu_id: String(recipeObj.menu_id),
+          version: 1,
+          is_active: true,
+          notes: recipeObj.notes,
+          created_at: recipeObj.created_at,
+        }]);
+
+        try { await supabase.from('recipe_details').delete().eq('recipe_id', canonicalRecipeId); } catch {}
+        const cleanDetails = newDetails.map((rd) => ({
+          id: String(rd.id),
+          recipe_id: String(rd.recipe_id),
+          ingredient_id: String(rd.ingredient_id),
+          quantity: Number(rd.quantity) || 0,
+        }));
+        try { await supabase.from('recipe_details').upsert(cleanDetails); } catch {}
+      }
+    } catch (e) {
+      console.warn('Error saving prepare formula to Supabase:', e);
+    }
   };
 
   // Transactions Handlers
@@ -2011,6 +2124,8 @@ ${recipeDetailInserts ? `INSERT INTO public.recipe_details (id, recipe_id, ingre
         addRecipeVersion,
         setActiveRecipeVersion,
         getMenuRecipeDetails,
+        getPrepareFormula,
+        savePrepareFormula,
 
         transactions,
         stockMovements,
