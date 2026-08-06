@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ArrowRightLeft,
   ShoppingBag,
@@ -80,30 +80,59 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
     { ingredient_id: preparedIngredients[0]?.id || ingredients[0]?.id || '', quantity: 1000, is_target: true },
   ]);
 
-  // Load / Sync Prepare Formula Template when Target PP or Qty Changes
+  const lastValidTargetQty = useRef<number>(1000);
+
+  // Load / Sync Prepare Formula Template ONLY when Target PP ingredient changes
   useEffect(() => {
     if (!prepTargetIngId) return;
     const { details } = getPrepareFormula(prepTargetIngId);
 
+    const baseQty = 1000;
+    setPrepTargetQty(baseQty);
+    lastValidTargetQty.current = baseQty;
+
     if (details && details.length > 0) {
-      const scaleFactor = prepTargetQty > 0 ? prepTargetQty / 1000 : 1;
       const sourceItems: PrepareItemInput[] = details.map((d) => ({
         ingredient_id: d.ingredient_id,
-        quantity: Math.round(Number(d.quantity) * scaleFactor * 100) / 100,
+        quantity: Math.round(Number(d.quantity) * 100) / 100,
         is_target: false,
       }));
       setPrepItems([
-        { ingredient_id: prepTargetIngId, quantity: prepTargetQty, is_target: true },
+        { ingredient_id: prepTargetIngId, quantity: baseQty, is_target: true },
         ...sourceItems,
       ]);
     } else {
       const defaultRaw = ingredients.find((i) => i.type === 'raw');
       setPrepItems([
-        { ingredient_id: prepTargetIngId, quantity: prepTargetQty, is_target: true },
-        ...(defaultRaw ? [{ ingredient_id: defaultRaw.id, quantity: prepTargetQty, is_target: false }] : []),
+        { ingredient_id: prepTargetIngId, quantity: baseQty, is_target: true },
+        ...(defaultRaw ? [{ ingredient_id: defaultRaw.id, quantity: baseQty, is_target: false }] : []),
       ]);
     }
-  }, [prepTargetIngId, prepTargetQty]);
+  }, [prepTargetIngId]);
+
+  const handleTargetQtyChange = (newVal: number) => {
+    setPrepTargetQty(newVal);
+
+    if (newVal > 0 && lastValidTargetQty.current > 0) {
+      const factor = newVal / lastValidTargetQty.current;
+      setPrepItems((prev) =>
+        prev.map((item) => {
+          if (item.is_target) {
+            return { ...item, ingredient_id: prepTargetIngId, quantity: newVal };
+          }
+          return {
+            ...item,
+            quantity: Math.round(item.quantity * factor * 100) / 100,
+          };
+        })
+      );
+      lastValidTargetQty.current = newVal;
+    } else if (newVal === 0) {
+      setPrepItems((prev) =>
+        prev.map((item) => (item.is_target ? { ...item, quantity: 0 } : item))
+      );
+    }
+  };
 
   const handleSavePrepareFormula = () => {
     if (!prepTargetIngId) return;
@@ -528,8 +557,12 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                       step="any"
                       required
                       min="1"
-                      value={prepTargetQty}
-                      onChange={(e) => setPrepTargetQty(Number(e.target.value) || 0)}
+                      value={prepTargetQty === 0 ? '' : prepTargetQty}
+                      onChange={(e) => {
+                        const rawVal = e.target.value;
+                        const val = rawVal === '' ? 0 : Number(rawVal);
+                        handleTargetQtyChange(val);
+                      }}
                       className="w-full px-3 py-2 text-xs font-mono font-bold text-stone-900 rounded-xl bg-white border border-stone-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                     <span className="text-xs font-bold text-stone-600 min-w-12">

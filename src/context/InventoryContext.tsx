@@ -1337,7 +1337,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (supabase) {
         await supabase.from('recipes').upsert([{
           id: String(recipeObj.id),
-          menu_id: String(recipeObj.menu_id),
+          menu_id: null,
           version: 1,
           is_active: true,
           notes: recipeObj.notes,
