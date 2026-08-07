@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
+import { SearchableIngredientSelect } from '../Common/SearchableIngredientSelect';
 import {
   TransactionType,
   PurchaseItemInput,
@@ -682,21 +683,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                         Keluar (-) Bahan Mentah
                       </span>
 
-                      <select
+                      <SearchableIngredientSelect
+                        ingredients={ingredients}
                         value={item.ingredient_id}
-                        onChange={(e) => {
+                        onChange={(newId) => {
                           const newItems = [...prepItems];
-                          newItems[idx].ingredient_id = e.target.value;
+                          newItems[idx].ingredient_id = newId;
                           setPrepItems(newItems);
                         }}
-                        className="flex-1 min-w-48 px-3 py-2 text-xs font-bold rounded-lg bg-white border border-stone-200 focus:outline-none"
-                      >
-                        {ingredients.map((i) => (
-                          <option key={i.id} value={i.id}>
-                            [{i.type === 'raw' ? 'Mentah' : 'Prepare PP'}] {i.name} (Stok: {formatNumber(i.current_stock)})
-                          </option>
-                        ))}
-                      </select>
+                        className="flex-1 min-w-48"
+                      />
 
                       <div className="w-36 flex items-center gap-1">
                         <input
@@ -837,10 +833,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                         <label className="block text-[10px] font-semibold text-stone-500 sm:hidden mb-1">
                           Pilih Bahan Baku
                         </label>
-                        <select
+                        <SearchableIngredientSelect
+                          ingredients={ingredients}
                           value={item.ingredient_id}
-                          onChange={(e) => {
-                            const newIngId = e.target.value;
+                          onChange={(newIngId) => {
                             const selectedIng = ingredients.find((i) => i.id === newIngId);
                             const newItems = [...purItems];
                             newItems[idx].ingredient_id = newIngId;
@@ -849,14 +845,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                             }
                             setPurItems(newItems);
                           }}
-                          className="w-full px-3 py-2 text-xs font-bold rounded-lg bg-white border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                        >
-                          {ingredients.map((i) => (
-                            <option key={i.id} value={i.id}>
-                              {i.name} ({i.code})
-                            </option>
-                          ))}
-                        </select>
+                          className="w-full"
+                        />
                       </div>
 
                       {/* Quantity Input */}
@@ -993,17 +983,12 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Bahan Baku</label>
-              <select
+              <SearchableIngredientSelect
+                ingredients={ingredients}
                 value={adjIngredientId}
-                onChange={(e) => setAdjIngredientId(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-              >
-                {ingredients.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.name} (Stok: {formatNumber(i.current_stock)})
-                  </option>
-                ))}
-              </select>
+                onChange={(newId) => setAdjIngredientId(newId)}
+                className="w-full"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">

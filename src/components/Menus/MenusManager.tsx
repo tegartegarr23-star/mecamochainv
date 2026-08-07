@@ -9,6 +9,7 @@ import {
 import { useInventory } from '../../context/InventoryContext';
 import { Menu } from '../../types';
 import { formatNumber } from '../../utils/formatters';
+import { SearchableIngredientSelect } from '../Common/SearchableIngredientSelect';
 
 export const MenusManager: React.FC = () => {
   const {
@@ -363,21 +364,16 @@ export const MenusManager: React.FC = () => {
                         key={idx}
                         className="flex items-center gap-2 p-2 rounded-xl bg-stone-50 border border-stone-200"
                       >
-                        <select
+                        <SearchableIngredientSelect
+                          ingredients={ingredients}
                           value={item.ingredient_id}
-                          onChange={(e) => {
+                          onChange={(newId) => {
                             const newItems = [...recipeItems];
-                            newItems[idx].ingredient_id = e.target.value;
+                            newItems[idx].ingredient_id = newId;
                             setRecipeItems(newItems);
                           }}
-                          className="flex-1 px-3 py-2 text-xs font-bold rounded-lg bg-white border border-stone-200 focus:outline-none"
-                        >
-                          {ingredients.map((i) => (
-                            <option key={i.id} value={i.id}>
-                              [{i.type === 'raw' ? 'Mentah' : 'Prepare PP'}] {i.name}
-                            </option>
-                          ))}
-                        </select>
+                          className="flex-1"
+                        />
 
                         <div className="w-32 flex items-center gap-1">
                           <input

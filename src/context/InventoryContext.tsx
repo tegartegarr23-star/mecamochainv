@@ -69,6 +69,7 @@ interface InventoryContextType {
 
   ingredients: Ingredient[];
   addIngredient: (ing: Omit<Ingredient, 'id' | 'current_stock'> & { initial_stock?: number }) => void;
+  bulkAddIngredients: (items: Array<Omit<Ingredient, 'id' | 'current_stock'> & { initial_stock?: number }>) => void;
   updateIngredient: (id: string, ing: Partial<Ingredient>) => void;
   deleteIngredient: (id: string) => void;
 
@@ -925,6 +926,62 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     syncDataToSupabase([newIng], initTrx, initMov ? [initMov] : []);
+  };
+
+  const bulkAddIngredients = (items: Array<Omit<Ingredient, 'id' | 'current_stock'> & { initial_stock?: number }>) => {
+    const newIngs: Ingredient[] = [];
+    const newTrxs: Transaction[] = [];
+    const newMovs: StockMovement[] = [];
+
+    items.forEach((ingData, idx) => {
+      const initialStock = ingData.initial_stock || 0;
+      const ingId = `ing-${Date.now()}-${idx}`;
+      const newIng: Ingredient = {
+        id: ingId,
+        code: ingData.code || `ING-${Math.floor(1000 + Math.random() * 9000)}`,
+        name: ingData.name,
+        category_id: ingData.category_id || '',
+        unit_id: ingData.unit_id || '',
+        type: ingData.type || 'raw',
+        min_stock: ingData.min_stock || 0,
+        current_stock: initialStock,
+        is_active: ingData.is_active ?? true,
+        cost_per_unit: ingData.cost_per_unit || 0,
+      };
+      newIngs.push(newIng);
+
+      if (initialStock > 0) {
+        const initTrxId = `trx-init-${Date.now()}-${idx}`;
+        const initTrx: Transaction = {
+          id: initTrxId,
+          type: 'adjustment',
+          transaction_date: new Date().toISOString(),
+          reference_no: generateRefNo('INIT'),
+          notes: 'Stok Awal Bulk Import Master Bahan',
+          created_by: currentUser.name,
+          adjustment_reason: 'Stock Opname',
+          created_at: new Date().toISOString(),
+        };
+        const initMov: StockMovement = {
+          id: `mov-init-${Date.now()}-${idx}`,
+          transaction_id: initTrxId,
+          ingredient_id: ingId,
+          type: 'in',
+          quantity: initialStock,
+          balance_after: initialStock,
+          description: 'Pencatatan Stok Awal Impor Massal',
+          created_at: new Date().toISOString(),
+        };
+        newTrxs.push(initTrx);
+        newMovs.push(initMov);
+      }
+    });
+
+    setIngredients((prev) => [...prev, ...newIngs]);
+    if (newTrxs.length > 0) setTransactions((prev) => [...newTrxs, ...prev]);
+    if (newMovs.length > 0) setStockMovements((prev) => [...newMovs, ...prev]);
+
+    syncDataToSupabase(newIngs, newTrxs[0], newMovs);
   };
 
   const updateIngredient = (id: string, ing: Partial<Ingredient>) => {
@@ -2193,6 +2250,7 @@ ${recipeDetailInserts ? `INSERT INTO public.recipe_details (id, recipe_id, ingre
 
         ingredients,
         addIngredient,
+        bulkAddIngredients,
         updateIngredient,
         deleteIngredient,
 

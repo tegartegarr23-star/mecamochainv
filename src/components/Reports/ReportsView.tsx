@@ -12,6 +12,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
+import { SearchableIngredientSelect } from '../Common/SearchableIngredientSelect';
 import { formatNumber, formatDate } from '../../utils/formatters';
 import {
   exportDailyStockToExcel,
@@ -199,19 +200,14 @@ export const ReportsView: React.FC = () => {
       {reportTab === 'ledger' && (
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-stone-200 shadow-xs">
-            <div className="flex items-center gap-3">
-              <label className="text-xs font-bold text-stone-800">Pilih Bahan Baku:</label>
-              <select
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <label className="text-xs font-bold text-stone-800 shrink-0">Pilih Bahan Baku:</label>
+              <SearchableIngredientSelect
+                ingredients={ingredients}
                 value={selectedIngredientId}
-                onChange={(e) => setSelectedIngredientId(e.target.value)}
-                className="px-3 py-2 text-xs font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-              >
-                {ingredients.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    [{i.code}] {i.name} (Stok Saat Ini: {formatNumber(i.current_stock)})
-                  </option>
-                ))}
-              </select>
+                onChange={(newId) => setSelectedIngredientId(newId)}
+                className="w-full sm:w-72"
+              />
             </div>
 
             <div className="flex items-center gap-2">
