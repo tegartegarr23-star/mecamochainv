@@ -97,6 +97,7 @@ interface InventoryContextType {
   addProductionTransaction: (date: string, menuId: string, portionCount: number, refNo: string, notes: string) => { success: boolean; message: string };
   
   addAdjustmentTransaction: (date: string, ingredientId: string, quantity: number, mode: 'plus' | 'minus' | 'set', reason: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other', notes: string) => void;
+  deleteTransaction: (transactionId: string) => void;
 
   // Sync & Supabase
   isSyncing: boolean;
@@ -1695,6 +1696,87 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     syncDataToSupabase([updatedIng], newTrx, [newMov], nextTrxs, nextMovs);
   };
 
+  const deleteTransaction = (transactionId: string) => {
+    const trxToDelete = transactions.find((t) => t.id === transactionId);
+    if (!trxToDelete) return;
+
+    // Find all stock movements associated with this transaction
+    const movsToDelete = stockMovements.filter(
+      (m) => m.transaction_id === transactionId
+    );
+
+    // Calculate stock changes to revert
+    // 'in' -> revert by subtracting quantity
+    // 'out' -> revert by adding quantity
+    const stockReversals: Record<string, number> = {};
+    movsToDelete.forEach((m) => {
+      if (!m.ingredient_id) return;
+      const ingKey = String(m.ingredient_id).trim();
+      if (!stockReversals[ingKey]) stockReversals[ingKey] = 0;
+      if (m.type === 'in') {
+        stockReversals[ingKey] -= Number(m.quantity) || 0;
+      } else if (m.type === 'out') {
+        stockReversals[ingKey] += Number(m.quantity) || 0;
+      }
+    });
+
+    const updatedIngredients = ingredients.map((ing) => {
+      const delta = stockReversals[ing.id] ?? stockReversals[ing.code] ?? 0;
+      if (delta !== 0) {
+        return {
+          ...ing,
+          current_stock: Number(ing.current_stock) + delta,
+        };
+      }
+      return ing;
+    });
+
+    const nextTrxs = transactions.filter((t) => t.id !== transactionId);
+    const nextMovs = stockMovements.filter((m) => m.transaction_id !== transactionId);
+
+    setIngredients(updatedIngredients);
+    setTransactions(nextTrxs);
+    setStockMovements(nextMovs);
+
+    // Save locally
+    saveToStorage(STORAGE_KEYS.INGREDIENTS, updatedIngredients);
+    saveToStorage(STORAGE_KEYS.TRANSACTIONS, nextTrxs);
+    saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, nextMovs);
+
+    // Delete from Supabase if active
+    const supabase = getSupabase();
+    if (supabase) {
+      (async () => {
+        try {
+          await supabase.from('stock_movements').delete().eq('transaction_id', transactionId);
+          try { await supabase.from('stock_moved').delete().eq('transaction_id', transactionId); } catch {}
+          await supabase.from('transactions').delete().eq('id', transactionId);
+
+          const changedIngs = updatedIngredients.filter(
+            (ing) => stockReversals[ing.id] !== undefined || stockReversals[ing.code] !== undefined
+          );
+          if (changedIngs.length > 0) {
+            const cleanIngs = changedIngs.map((ing) => ({
+              id: String(ing.id),
+              code: String(ing.code),
+              name: String(ing.name),
+              category_id: ing.category_id ? String(ing.category_id) : null,
+              unit_id: ing.unit_id ? String(ing.unit_id) : null,
+              type: ing.type || 'raw',
+              min_stock: Number(ing.min_stock) || 0,
+              current_stock: Number(ing.current_stock) || 0,
+              is_active: ing.is_active !== false,
+              cost_per_unit: Number(ing.cost_per_unit) || 0,
+            }));
+            await supabase.from('ingredients').upsert(cleanIngs);
+          }
+        } catch (e) {
+          console.warn('Error deleting transaction from Supabase:', e);
+        }
+      })();
+    }
+  };
+
   // Daily Stock Report Generator
   const getDailyStockReport = (dateFilter: string): DailyStockRow[] => {
     // Standardize filter date to local YYYY-MM-DD
@@ -2134,6 +2216,7 @@ ${recipeDetailInserts ? `INSERT INTO public.recipe_details (id, recipe_id, ingre
         checkProductionSufficiency,
         addProductionTransaction,
         addAdjustmentTransaction,
+        deleteTransaction,
 
         isSyncing,
         lastSyncedAt,

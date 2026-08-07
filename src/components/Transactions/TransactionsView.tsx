@@ -15,12 +15,15 @@ import {
   Trash2,
   Sparkles,
   Info,
+  Eye,
+  X,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
 import {
   TransactionType,
   PurchaseItemInput,
   PrepareItemInput,
+  Transaction,
 } from '../../types';
 import { formatNumber, formatCurrency, formatDate, generateRefNo } from '../../utils/formatters';
 
@@ -41,6 +44,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
     checkProductionSufficiency,
     addProductionTransaction,
     addAdjustmentTransaction,
+    deleteTransaction,
     getPrepareFormula,
     savePrepareFormula,
   } = useInventory();
@@ -52,11 +56,82 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
   const [historyTypeFilter, setHistoryTypeFilter] = useState<'all' | 'purchase' | 'prepare' | 'production' | 'adjustment'>('all');
 
+  const [selectedTrxForDetail, setSelectedTrxForDetail] = useState<Transaction | null>(null);
+  const [selectedTrxForDelete, setSelectedTrxForDelete] = useState<Transaction | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
   useEffect(() => {
     if (initialAction) {
       setActiveTab(initialAction);
     }
   }, [initialAction]);
+
+  // Helper for quick date selection (Hari Ini, Kemarin, 2 Hari Lalu)
+  const getDateDaysAgo = (days: number): string => {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const renderQuickDatePicker = (
+    label: string,
+    value: string,
+    onChange: (val: string) => void
+  ) => {
+    const today = getDateDaysAgo(0);
+    const yesterday = getDateDaysAgo(1);
+    const twoDaysAgo = getDateDaysAgo(2);
+
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-xs font-semibold text-stone-700">{label}</label>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onChange(today)}
+              className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-all ${
+                value === today
+                  ? 'bg-stone-900 text-white shadow-xs'
+                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              Hari Ini
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange(yesterday)}
+              className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-all ${
+                value === yesterday
+                  ? 'bg-stone-900 text-white shadow-xs'
+                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              Kemarin
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange(twoDaysAgo)}
+              className={`px-2 py-0.5 text-[10px] font-bold rounded-lg transition-all ${
+                value === twoDaysAgo
+                  ? 'bg-stone-900 text-white shadow-xs'
+                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              2 Hari Lalu
+            </button>
+          </div>
+        </div>
+        <input
+          type="date"
+          required
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full px-3 py-2 text-xs font-bold text-stone-900 rounded-xl bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+        />
+      </div>
+    );
+  };
 
   // FORM STATES
 
@@ -315,16 +390,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
             )}
 
             <form onSubmit={handleProductionSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Tanggal Produksi</label>
-                <input
-                  type="date"
-                  required
-                  value={prodDate}
-                  onChange={(e) => setProdDate(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-                />
-              </div>
+              {renderQuickDatePicker('Tanggal Produksi', prodDate, setProdDate)}
 
               <div>
                 <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Menu / Produk</label>
@@ -487,16 +553,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
           <form onSubmit={handlePrepareSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Tanggal</label>
-                <input
-                  type="date"
-                  required
-                  value={prepDate}
-                  onChange={(e) => setPrepDate(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-                />
-              </div>
+              {renderQuickDatePicker('Tanggal Prepare', prepDate, setPrepDate)}
               <div>
                 <label className="block text-xs font-semibold text-stone-700 mb-1">No. Referensi</label>
                 <input
@@ -703,16 +760,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
           <form onSubmit={handlePurchaseSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Tanggal Pembelian</label>
-                <input
-                  type="date"
-                  required
-                  value={purDate}
-                  onChange={(e) => setPurDate(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-                />
-              </div>
+              {renderQuickDatePicker('Tanggal Pembelian', purDate, setPurDate)}
               <div>
                 <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Supplier</label>
                 <select
@@ -928,16 +976,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
           <form onSubmit={handleAdjustmentSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Tanggal</label>
-                <input
-                  type="date"
-                  required
-                  value={adjDate}
-                  onChange={(e) => setAdjDate(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-                />
-              </div>
+              {renderQuickDatePicker('Tanggal Penyesuaian', adjDate, setAdjDate)}
               <div>
                 <label className="block text-xs font-semibold text-stone-700 mb-1">Tipe Penyesuaian</label>
                 <select
@@ -1129,6 +1168,19 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
             </button>
           </div>
 
+          {/* Toast Notification */}
+          {toastMsg && (
+            <div className="p-3.5 rounded-2xl bg-emerald-950 text-emerald-100 text-xs font-bold flex items-center justify-between shadow-lg animate-in fade-in slide-in-from-top-2 border border-emerald-800">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{toastMsg}</span>
+              </div>
+              <button onClick={() => setToastMsg(null)} className="text-emerald-400 hover:text-white p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-stone-50 text-stone-600 font-semibold border-b border-stone-200">
@@ -1136,8 +1188,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                   <th className="p-3.5">Tanggal</th>
                   <th className="p-3.5">No. Referensi</th>
                   <th className="p-3.5">Tipe Transaksi</th>
-                  <th className="p-3.5">Catatan / Detail</th>
+                  <th className="p-3.5">Rincian / Catatan</th>
                   <th className="p-3.5">Dicatat Oleh</th>
+                  <th className="p-3.5 text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
@@ -1159,29 +1212,305 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                     }[trx.type];
 
                     let detailText = trx.notes || '-';
-                    if (trx.type === 'production' && trx.menu_id) {
+                    if (trx.type === 'purchase') {
+                      const supplier = suppliers.find((s) => s.id === trx.supplier_id);
+                      const movs = stockMovements.filter((m) => m.transaction_id === trx.id);
+                      const supplierName = supplier ? supplier.name : 'Supplier';
+                      detailText = `Pembelian dari ${supplierName} (${movs.length > 0 ? `${movs.length} jenis bahan` : 'Bahan Baku'})${trx.notes ? ` - ${trx.notes}` : ''}`;
+                    } else if (trx.type === 'prepare') {
+                      const movs = stockMovements.filter((m) => m.transaction_id === trx.id);
+                      const targetMov = movs.find((m) => m.type === 'in');
+                      const targetIng = ingredients.find((i) => i.id === targetMov?.ingredient_id || i.code === targetMov?.ingredient_id);
+                      const sourceCount = movs.filter((m) => m.type === 'out').length;
+                      const targetName = targetIng ? targetIng.name : 'Bahan PP';
+                      detailText = `Prepare ${targetName} (+${formatNumber(targetMov?.quantity || 0)}) dari ${sourceCount} bahan mentah${trx.notes ? ` - ${trx.notes}` : ''}`;
+                    } else if (trx.type === 'production') {
                       const menu = menus.find((m) => m.id === trx.menu_id);
-                      detailText = `Penjualan / Produksi ${trx.portion_count || 1} porsi ${menu ? menu.name : 'Menu'} ${trx.notes ? `(${trx.notes})` : ''}`;
-                    } else if (trx.type === 'adjustment' && trx.adjustment_reason) {
-                      detailText = `Penyesuaian (${trx.adjustment_reason}) ${trx.notes ? `- ${trx.notes}` : ''}`;
+                      detailText = `Produksi ${trx.portion_count || 1} porsi ${menu ? menu.name : 'Menu'}${trx.notes ? ` (${trx.notes})` : ''}`;
+                    } else if (trx.type === 'adjustment') {
+                      const movs = stockMovements.filter((m) => m.transaction_id === trx.id);
+                      const adjIng = ingredients.find((i) => i.id === movs[0]?.ingredient_id || i.code === movs[0]?.ingredient_id);
+                      const ingName = adjIng ? adjIng.name : 'Bahan';
+                      const moveType = movs[0]?.type === 'in' ? '+' : '-';
+                      detailText = `Penyesuaian ${ingName} (${moveType}${formatNumber(movs[0]?.quantity || 0)}) [${trx.adjustment_reason || 'Opname'}]${trx.notes ? ` - ${trx.notes}` : ''}`;
                     }
 
                     return (
-                      <tr key={trx.id} className="hover:bg-stone-50">
-                        <td className="p-3.5 text-stone-600">{formatDate(trx.transaction_date, true)}</td>
+                      <tr key={trx.id} className="hover:bg-stone-50 transition-colors">
+                        <td className="p-3.5 text-stone-600 font-medium whitespace-nowrap">{formatDate(trx.transaction_date, true)}</td>
                         <td className="p-3.5 font-mono font-bold text-stone-800">{trx.reference_no}</td>
                         <td className="p-3.5">
-                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${badgeClass}`}>
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${badgeClass}`}>
                             {typeLabel}
                           </span>
                         </td>
                         <td className="p-3.5 text-stone-700 font-medium">{detailText}</td>
-                        <td className="p-3.5 text-stone-600 font-medium">{trx.created_by}</td>
+                        <td className="p-3.5 text-stone-600 font-medium whitespace-nowrap">{trx.created_by}</td>
+                        <td className="p-3.5 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTrxForDetail(trx)}
+                              className="px-2.5 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold transition-all flex items-center gap-1 border border-stone-200"
+                              title="Lihat Rincian Transaksi"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-stone-600" />
+                              <span>Rincian</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTrxForDelete(trx)}
+                              className="px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-all flex items-center gap-1 border border-rose-200"
+                              title="Hapus Transaksi & Kembalikan Stok"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                              <span>Hapus</span>
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* DETAIL TRANSAKSI MODAL */}
+      {selectedTrxForDetail && (
+        <div className="fixed inset-0 z-50 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-stone-200 max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-4 border-b border-stone-200 flex items-center justify-between bg-stone-50">
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-amber-100 text-amber-900 font-mono font-bold text-xs">
+                  {selectedTrxForDetail.reference_no}
+                </span>
+                <div>
+                  <h3 className="font-bold text-stone-900 text-sm font-serif">Rincian Transaksi Inventaris</h3>
+                  <p className="text-[11px] text-stone-500">
+                    Detail pergerakan stok bahan & informasi transaksi
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedTrxForDetail(null)}
+                className="p-1.5 text-stone-400 hover:text-stone-700 rounded-lg hover:bg-stone-200 transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              {/* Meta Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs">
+                <div>
+                  <span className="text-stone-400 text-[10px] block uppercase font-bold">Tipe Transaksi</span>
+                  <span className="font-bold text-stone-900 capitalize">
+                    {{
+                      purchase: '🛒 Pembelian',
+                      prepare: '🍳 Prepare (Konversi)',
+                      production: '🍲 Produksi Menu',
+                      adjustment: '⚖️ Penyesuaian Stok',
+                    }[selectedTrxForDetail.type]}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-stone-400 text-[10px] block uppercase font-bold">Tanggal & Waktu</span>
+                  <span className="font-bold text-stone-900">
+                    {formatDate(selectedTrxForDetail.transaction_date, true)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-stone-400 text-[10px] block uppercase font-bold">Dicatat Oleh</span>
+                  <span className="font-bold text-stone-900">{selectedTrxForDetail.created_by}</span>
+                </div>
+                <div>
+                  <span className="text-stone-400 text-[10px] block uppercase font-bold">Catatan</span>
+                  <span className="font-semibold text-stone-700">{selectedTrxForDetail.notes || '-'}</span>
+                </div>
+              </div>
+
+              {/* Contextual Info */}
+              {selectedTrxForDetail.type === 'purchase' && selectedTrxForDetail.supplier_id && (
+                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between">
+                  <span className="font-bold">Supplier / Pemasok:</span>
+                  <span className="font-mono font-extrabold">
+                    {suppliers.find((s) => s.id === selectedTrxForDetail.supplier_id)?.name || 'Supplier'}
+                  </span>
+                </div>
+              )}
+
+              {selectedTrxForDetail.type === 'production' && selectedTrxForDetail.menu_id && (
+                <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-center justify-between">
+                  <span className="font-bold">Menu Diproduksi:</span>
+                  <span className="font-extrabold">
+                    {menus.find((m) => m.id === selectedTrxForDetail.menu_id)?.name || 'Menu'} ({selectedTrxForDetail.portion_count || 1} Porsi)
+                  </span>
+                </div>
+              )}
+
+              {selectedTrxForDetail.type === 'adjustment' && selectedTrxForDetail.adjustment_reason && (
+                <div className="p-3 bg-purple-50 rounded-xl border border-purple-200 text-xs text-purple-900 flex items-center justify-between">
+                  <span className="font-bold">Alasan Penyesuaian:</span>
+                  <span className="font-extrabold">{selectedTrxForDetail.adjustment_reason}</span>
+                </div>
+              )}
+
+              {/* Stock Movements Table */}
+              <div>
+                <h4 className="text-xs font-bold text-stone-900 mb-2 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-stone-600" /> Rincian Pergerakan Stok Bahan
+                </h4>
+                <div className="border border-stone-200 rounded-xl overflow-hidden text-xs">
+                  <table className="w-full text-left">
+                    <thead className="bg-stone-100 text-stone-600 font-semibold border-b border-stone-200">
+                      <tr>
+                        <th className="p-2.5">Bahan</th>
+                        <th className="p-2.5 text-center">Pergerakan</th>
+                        <th className="p-2.5 text-right">Jumlah</th>
+                        <th className="p-2.5 text-right">Sisa Stok Setelahnya</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {stockMovements
+                        .filter((m) => m.transaction_id === selectedTrxForDetail.id)
+                        .map((mov) => {
+                          const ing = ingredients.find((i) => i.id === mov.ingredient_id || i.code === mov.ingredient_id);
+                          const unit = units.find((u) => u.id === ing?.unit_id);
+                          const isIn = mov.type === 'in';
+
+                          return (
+                            <tr key={mov.id} className="hover:bg-stone-50">
+                              <td className="p-2.5">
+                                <span className="font-bold text-stone-900 block">{ing?.name || mov.ingredient_id}</span>
+                                <span className="font-mono text-[10px] text-stone-400">[{ing?.code || 'RAW'}]</span>
+                              </td>
+                              <td className="p-2.5 text-center">
+                                <span
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
+                                    isIn ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                                  }`}
+                                >
+                                  {isIn ? '+ Masuk' : '- Keluar'}
+                                </span>
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-bold text-stone-800">
+                                {isIn ? '+' : '-'}{formatNumber(mov.quantity)} {unit?.abbreviation || ''}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-extrabold text-stone-900">
+                                {formatNumber(mov.balance_after)} {unit?.abbreviation || ''}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-stone-200 bg-stone-50 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  const trx = selectedTrxForDetail;
+                  setSelectedTrxForDetail(null);
+                  setSelectedTrxForDelete(trx);
+                }}
+                className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-all flex items-center gap-1.5 border border-rose-200"
+              >
+                <Trash2 className="w-4 h-4" /> Hapus Transaksi Ini
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedTrxForDetail(null)}
+                className="px-4 py-2 rounded-xl bg-stone-900 text-white hover:bg-stone-800 text-xs font-bold transition-all"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {selectedTrxForDelete && (
+        <div className="fixed inset-0 z-50 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-stone-200 max-w-lg w-full p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-3">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-700 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-stone-900 text-base font-serif">
+                  Hapus Transaksi & Revert Stok?
+                </h3>
+                <p className="text-xs text-stone-500 mt-1">
+                  No. Ref: <span className="font-mono font-bold text-stone-800">{selectedTrxForDelete.reference_no}</span> ({formatDate(selectedTrxForDelete.transaction_date)})
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900 space-y-2">
+              <p className="font-bold flex items-center gap-1.5">
+                <Info className="w-4 h-4 shrink-0 text-rose-700" /> PERINGATAN REVERT STOK:
+              </p>
+              <p className="text-rose-800 text-[11px] leading-relaxed">
+                Menghapus transaksi ini akan secara otomatis <strong>MENGEMBALIKAN (rollback) stok seluruh bahan</strong> yang terpengaruh ke posisi sebelum transaksi dibuat.
+              </p>
+            </div>
+
+            <div>
+              <h4 className="text-xs font-bold text-stone-800 mb-2">Daftar Perubahan Stok Yang Akan Di-revert:</h4>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                {stockMovements
+                  .filter((m) => m.transaction_id === selectedTrxForDelete.id)
+                  .map((mov) => {
+                    const ing = ingredients.find((i) => i.id === mov.ingredient_id || i.code === mov.ingredient_id);
+                    const unit = units.find((u) => u.id === ing?.unit_id);
+                    const revertType = mov.type === 'in' ? 'Berkurang (-)' : 'Bertambah (+)';
+                    const revertColor = mov.type === 'in' ? 'text-rose-700 bg-rose-50 border-rose-200' : 'text-emerald-700 bg-emerald-50 border-emerald-200';
+
+                    return (
+                      <div key={mov.id} className="p-2 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-bold text-stone-900 block">{ing?.name || mov.ingredient_id}</span>
+                          <span className="text-[10px] text-stone-500 font-mono">Stok Sekarang: {formatNumber(ing?.current_stock || 0)} {unit?.abbreviation || ''}</span>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-lg border font-mono font-extrabold text-[11px] ${revertColor}`}>
+                          {revertType} {formatNumber(mov.quantity)} {unit?.abbreviation || ''}
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-stone-100">
+              <button
+                type="button"
+                onClick={() => setSelectedTrxForDelete(null)}
+                className="px-4 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const refNo = selectedTrxForDelete.reference_no;
+                  deleteTransaction(selectedTrxForDelete.id);
+                  setSelectedTrxForDelete(null);
+                  setToastMsg(`Transaksi ${refNo} berhasil dihapus dan posisi stok bahan telah dikembalikan ke kondisi semula.`);
+                  setTimeout(() => setToastMsg(null), 4000);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Ya, Hapus & Revert Stok</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
