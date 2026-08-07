@@ -117,17 +117,17 @@ interface InventoryContextType {
 }
 
 const STORAGE_KEYS = {
-  USERS: 'mecamocha_users_v2',
-  CURRENT_USER: 'mecamocha_current_user_v2',
-  UNITS: 'mecamocha_units_v2',
-  CATEGORIES: 'mecamocha_categories_v2',
-  SUPPLIERS: 'mecamocha_suppliers_v2',
-  INGREDIENTS: 'mecamocha_ingredients_v2',
-  MENUS: 'mecamocha_menus_v2',
-  RECIPES: 'mecamocha_recipes_v2',
-  RECIPE_DETAILS: 'mecamocha_recipe_details_v2',
-  TRANSACTIONS: 'mecamocha_transactions_v2',
-  STOCK_MOVEMENTS: 'mecamocha_stock_movements_v2',
+  USERS: 'mecamocha_users_v3',
+  CURRENT_USER: 'mecamocha_current_user_v3',
+  UNITS: 'mecamocha_units_v3',
+  CATEGORIES: 'mecamocha_categories_v3',
+  SUPPLIERS: 'mecamocha_suppliers_v3',
+  INGREDIENTS: 'mecamocha_ingredients_v3',
+  MENUS: 'mecamocha_menus_v3',
+  RECIPES: 'mecamocha_recipes_v3',
+  RECIPE_DETAILS: 'mecamocha_recipe_details_v3',
+  TRANSACTIONS: 'mecamocha_transactions_v3',
+  STOCK_MOVEMENTS: 'mecamocha_stock_movements_v3',
 };
 
 const InventoryContext = createContext<InventoryContextType | undefined>(undefined);
@@ -143,8 +143,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (Array.isArray(parsed) && parsed.length === 0 && Array.isArray(fallback) && fallback.length > 0) {
         return fallback;
       }
-      // Fallback if legacy ingredients list with < 50 items
-      if (key === STORAGE_KEYS.INGREDIENTS && Array.isArray(parsed) && parsed.length < 50) {
+      // Fallback if legacy ingredients list with < 80 items
+      if (key === STORAGE_KEYS.INGREDIENTS && Array.isArray(parsed) && parsed.length < 80) {
+        return fallback;
+      }
+      // Fallback if legacy menus list with < 50 items
+      if (key === STORAGE_KEYS.MENUS && Array.isArray(parsed) && parsed.length < 50) {
         return fallback;
       }
       return parsed;
@@ -226,6 +230,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           current_stock: Number(ing.current_stock) || 0,
           is_active: ing.is_active ?? true,
           cost_per_unit: Number(ing.cost_per_unit) || 0,
+          cogs_per_unit: Number(ing.cost_per_unit) || 0,
         }));
 
         const { error: ingErr } = await supabase.from('ingredients').upsert(cleanIngredients);
@@ -444,7 +449,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         name: String(ing.name || ''),
         current_stock: Number(ing.current_stock) || 0,
         min_stock: Number(ing.min_stock) || 0,
-        cost_per_unit: Number(ing.cost_per_unit) || 0,
+        cost_per_unit: Number(ing.cost_per_unit ?? ing.cogs_per_unit) || 0,
       }));
 
       // Safely merge transactions so local un-synced transactions are preserved
@@ -536,6 +541,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         current_stock: getIngredientCurrentStock(ing, stockMovements),
         is_active: ing.is_active ?? true,
         cost_per_unit: Number(ing.cost_per_unit) || 0,
+        cogs_per_unit: Number(ing.cost_per_unit) || 0,
       }));
 
       const cleanMenus = menus.map((m) => {
@@ -2031,7 +2037,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             ing.unit_id ? `'${ing.unit_id}'` : 'NULL'
           }, '${ing.type}', ${ing.min_stock || 0}, ${ing.current_stock || 0}, ${
             ing.is_active ? 'TRUE' : 'FALSE'
-          }, ${ing.cost_per_unit || 0})`
+          }, ${ing.cost_per_unit || 0}, ${ing.cost_per_unit || 0})`
       )
       .join(',\n');
 
@@ -2114,8 +2120,11 @@ CREATE TABLE IF NOT EXISTS public.ingredients (
   current_stock DOUBLE PRECISION DEFAULT 0,
   is_active BOOLEAN DEFAULT TRUE,
   cost_per_unit DOUBLE PRECISION DEFAULT 0,
+  cogs_per_unit DOUBLE PRECISION DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE public.ingredients ADD COLUMN IF NOT EXISTS cost_per_unit DOUBLE PRECISION DEFAULT 0;
+ALTER TABLE public.ingredients ADD COLUMN IF NOT EXISTS cogs_per_unit DOUBLE PRECISION DEFAULT 0;
 
 -- 5. Create Menus Table
 CREATE TABLE IF NOT EXISTS public.menus (
@@ -2124,8 +2133,10 @@ CREATE TABLE IF NOT EXISTS public.menus (
   category TEXT NOT NULL,
   price DOUBLE PRECISION NOT NULL DEFAULT 0,
   is_active BOOLEAN DEFAULT TRUE,
+  active_recipe_version INT DEFAULT 1,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE public.menus ADD COLUMN IF NOT EXISTS active_recipe_version INT DEFAULT 1;
 
 -- 6. Create Recipes Table
 CREATE TABLE IF NOT EXISTS public.recipes (
@@ -2206,7 +2217,7 @@ INSERT INTO public.categories (id, name) VALUES
 ${categoryInserts}
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 
-INSERT INTO public.ingredients (id, code, name, category_id, unit_id, type, min_stock, current_stock, is_active, cost_per_unit) VALUES
+INSERT INTO public.ingredients (id, code, name, category_id, unit_id, type, min_stock, current_stock, is_active, cost_per_unit, cogs_per_unit) VALUES
 ${ingredientInserts}
 ON CONFLICT (id) DO UPDATE SET
   code = EXCLUDED.code,
@@ -2216,7 +2227,8 @@ ON CONFLICT (id) DO UPDATE SET
   type = EXCLUDED.type,
   min_stock = EXCLUDED.min_stock,
   is_active = EXCLUDED.is_active,
-  cost_per_unit = EXCLUDED.cost_per_unit;
+  cost_per_unit = EXCLUDED.cost_per_unit,
+  cogs_per_unit = EXCLUDED.cogs_per_unit;
 
 ${menuInserts ? `INSERT INTO public.menus (id, name, category, price, is_active) VALUES\n${menuInserts}\nON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, category = EXCLUDED.category, price = EXCLUDED.price, is_active = EXCLUDED.is_active;\n` : ''}
 ${recipeInserts ? `INSERT INTO public.recipes (id, menu_id, version, is_active, notes) VALUES\n${recipeInserts}\nON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, is_active = EXCLUDED.is_active, notes = EXCLUDED.notes;\n` : ''}

@@ -29,9 +29,16 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setIsOpenSidebar, onO
   // Calculate critical stock count
   const criticalStockCount = ingredients.filter((i) => i.is_active && i.current_stock <= i.min_stock).length;
 
-  const sqlFixCode = `-- JALANKAN DI SUPABASE SQL EDITOR UNTUK MEMBUKA AKSES SIMPAN/UPDATE DATA:
+  const sqlFixCode = `-- JALANKAN DI SUPABASE SQL EDITOR UNTUK MEMPERBAIKI STRUKTUR TABEL & IZIN (RLS):
 
--- 1. Matikan RLS atau izinkan ALL (INSERT, UPDATE, DELETE) untuk anon/public:
+-- 1. Tambahkan kolom cost_per_unit dan cogs_per_unit di ingredients:
+ALTER TABLE public.ingredients ADD COLUMN IF NOT EXISTS cost_per_unit DOUBLE PRECISION DEFAULT 0;
+ALTER TABLE public.ingredients ADD COLUMN IF NOT EXISTS cogs_per_unit DOUBLE PRECISION DEFAULT 0;
+
+-- 2. Tambahkan kolom active_recipe_version di menus:
+ALTER TABLE public.menus ADD COLUMN IF NOT EXISTS active_recipe_version INT DEFAULT 1;
+
+-- 3. Matikan RLS agar aplikasi Web dapat simpan/update data:
 ALTER TABLE public.ingredients DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stock_movements DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions DISABLE ROW LEVEL SECURITY;
@@ -40,12 +47,7 @@ ALTER TABLE public.recipes DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recipe_details DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.units DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.categories DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.suppliers DISABLE ROW LEVEL SECURITY;
-
--- ATAU jika ingin tetap pakai RLS, ubah Policy Command di Supabase Dashboard dari SELECT menjadi ALL:
--- 1. Buka Supabase Dashboard -> Database -> Policies
--- 2. Pilih tabel 'ingredients', 'stock_movements', 'transactions'
--- 3. Klik Edit Policy -> Ubah "Policy Command" dari SELECT menjadi ALL.`;
+ALTER TABLE public.suppliers DISABLE ROW LEVEL SECURITY;`;
 
   const handleCopySql = () => {
     navigator.clipboard.writeText(sqlFixCode);

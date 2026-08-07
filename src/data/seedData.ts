@@ -10,6 +10,12 @@ import {
   Transaction,
   StockMovement,
 } from '../types';
+import {
+  BEVERAGE_INGREDIENTS,
+  BEVERAGE_MENUS,
+  BEVERAGE_RECIPES,
+  BEVERAGE_RECIPE_DETAILS,
+} from './beverageSeed';
 
 export const INITIAL_USERS: AppUser[] = [
   {
@@ -37,6 +43,7 @@ export const INITIAL_UNITS: Unit[] = [
   { id: 'u-4', name: 'Pack', abbreviation: 'pack' },
   { id: 'u-5', name: 'Kilogram', abbreviation: 'kg' },
   { id: 'u-6', name: 'Liter', abbreviation: 'l' },
+  { id: 'u-7', name: 'Botol / Bottle', abbreviation: 'btl' },
 ];
 
 export const INITIAL_CATEGORIES: Category[] = [
@@ -46,6 +53,7 @@ export const INITIAL_CATEGORIES: Category[] = [
   { id: 'c-4', name: 'Tepung & Bahan Kering' },
   { id: 'c-5', name: 'Bahan Setengah Jadi (PP)' },
   { id: 'c-6', name: 'Kemasan & Catering' },
+  { id: 'c-7', name: 'Bahan Minuman & Kopi' },
 ];
 
 export const INITIAL_SUPPLIERS: Supplier[] = [
@@ -190,6 +198,7 @@ export const INITIAL_INGREDIENTS: Ingredient[] = [
   { id: 'ing-pp020', code: 'PP020', name: 'PP Lotus Biscoff Cookies', category_id: 'c-5', unit_id: 'u-3', type: 'prepared', min_stock: 30, current_stock: 120, is_active: true, cost_per_unit: 4000 },
   { id: 'ing-pp021', code: 'PP021', name: 'PP Double Choco Cookies', category_id: 'c-5', unit_id: 'u-3', type: 'prepared', min_stock: 30, current_stock: 120, is_active: true, cost_per_unit: 4000 },
   { id: 'ing-pp022', code: 'PP022', name: 'PP MATCHA', category_id: 'c-5', unit_id: 'u-1', type: 'prepared', min_stock: 200, current_stock: 800, is_active: true, cost_per_unit: 50 },
+  ...BEVERAGE_INGREDIENTS,
 ];
 
 export const INITIAL_MENUS: Menu[] = [
@@ -214,6 +223,7 @@ export const INITIAL_MENUS: Menu[] = [
   { id: 'mn-19', name: 'Nasi Telur Crispy', category: 'Main Course', price: 25000, is_active: true, active_recipe_version: 1 },
   { id: 'mn-20', name: 'Ayam Sambal Matah', category: 'Main Course', price: 38000, is_active: true, active_recipe_version: 1 },
   { id: 'mn-21', name: 'Double Choco Cookies', category: 'Dessert', price: 25000, is_active: true, active_recipe_version: 1 },
+  ...BEVERAGE_MENUS,
 ];
 
 export const INITIAL_RECIPES: Recipe[] = [
@@ -238,6 +248,7 @@ export const INITIAL_RECIPES: Recipe[] = [
   { id: 'rec-mn19', menu_id: 'mn-19', version: 1, is_active: true, notes: 'Resep MN019 Nasi Telur Crispy' },
   { id: 'rec-mn20', menu_id: 'mn-20', version: 1, is_active: true, notes: 'Resep MN020 Ayam Sambal Matah' },
   { id: 'rec-mn21', menu_id: 'mn-21', version: 1, is_active: true, notes: 'Resep MN021 Double Choco Cookies' },
+  ...BEVERAGE_RECIPES,
 ];
 
 export const INITIAL_RECIPE_DETAILS: RecipeDetail[] = [
@@ -428,6 +439,7 @@ export const INITIAL_RECIPE_DETAILS: RecipeDetail[] = [
   // MN021: Double Choco Cookies
   { id: 'rd-m21-1', recipe_id: 'rec-mn21', ingredient_id: 'ing-mm034', quantity: 1 },
   { id: 'rd-m21-2', recipe_id: 'rec-mn21', ingredient_id: 'ing-pp021', quantity: 1 },
+  ...BEVERAGE_RECIPE_DETAILS,
 ];
 
 const todayISO = new Date().toISOString();
