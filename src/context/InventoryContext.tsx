@@ -529,8 +529,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return false;
       }
 
-      // Step 2: Push ingredients and menus
-      const cleanIngs = ingredients.map((ing) => ({
+      // Step 2: Push ingredients and menus (incorporating initial seed data if not present)
+      const mergedIngredients = mergeByField(INITIAL_INGREDIENTS, ingredients, 'id');
+      const mergedMenus = mergeByField(INITIAL_MENUS, menus, 'id');
+      const mergedRecipes = mergeByField(INITIAL_RECIPES, recipes, 'id');
+      const mergedRecipeDetails = mergeByField(INITIAL_RECIPE_DETAILS, recipeDetails, 'id');
+
+      const cleanIngs = mergedIngredients.map((ing) => ({
         id: String(ing.id),
         code: String(ing.code || ''),
         name: String(ing.name || ''),
@@ -544,9 +549,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         cogs_per_unit: Number(ing.cost_per_unit) || 0,
       }));
 
-      const cleanMenus = menus.map((m) => {
-        const catObj = categories.find((c) => c.id === m.category_id);
-        const catName = m.category || catObj?.name || 'Umum';
+      const cleanMenus = mergedMenus.map((m) => {
+        const catName = m.category || 'Umum';
         return {
           id: String(m.id),
           name: String(m.name),
@@ -556,8 +560,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         };
       });
 
-      const cleanRecipes = recipes
-        .filter((r) => menus.some((m) => m.id === r.menu_id))
+      const cleanRecipes = mergedRecipes
+        .filter((r) => mergedMenus.some((m) => m.id === r.menu_id))
         .map((r) => ({
           id: String(r.id),
           menu_id: String(r.menu_id),
@@ -567,8 +571,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           created_at: r.created_at || new Date().toISOString(),
         }));
 
-      const cleanRecipeDetails = recipeDetails
-        .filter((rd) => ingredients.some((i) => i.id === rd.ingredient_id))
+      const cleanRecipeDetails = mergedRecipeDetails
+        .filter((rd) => mergedIngredients.some((i) => i.id === rd.ingredient_id))
         .map((rd) => ({
           id: String(rd.id),
           recipe_id: String(rd.recipe_id),
@@ -1279,7 +1283,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     let recipe = recipes.find((r) => r.menu_id === menuId && r.is_active) || recipes.find((r) => r.menu_id === menuId);
 
     if (!recipe) {
-      recipe = {
+      recipe = INITIAL_RECIPES.find((r) => r.menu_id === menuId && r.is_active) || INITIAL_RECIPES.find((r) => r.menu_id === menuId) || {
         id: `rec-${menuId}`,
         menu_id: menuId,
         version: 1,
@@ -1296,8 +1300,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       menuId,
     ]);
     recipes.filter((r) => r.menu_id === menuId).forEach((r) => possibleRecipeIds.add(r.id));
+    INITIAL_RECIPES.filter((r) => r.menu_id === menuId).forEach((r) => possibleRecipeIds.add(r.id));
 
-    const rawDetails = recipeDetails.filter((rd) => rd && rd.recipe_id && possibleRecipeIds.has(rd.recipe_id));
+    let rawDetails = recipeDetails.filter((rd) => rd && rd.recipe_id && possibleRecipeIds.has(rd.recipe_id));
+
+    // Fallback to initial seed details if no details are found in active state
+    if (rawDetails.length === 0) {
+      rawDetails = INITIAL_RECIPE_DETAILS.filter((rd) => rd && rd.recipe_id && possibleRecipeIds.has(rd.recipe_id));
+    }
 
     const userSaved = rawDetails.filter((rd) => rd.id && (rd.id.startsWith('rd-rec-') || rd.id.startsWith(`rd-${recipe.id}`)));
     const targetDetails = userSaved.length > 0 ? userSaved : rawDetails;
@@ -1310,8 +1320,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     const details = Array.from(uniqueDetailsMap.values()).map((rd) => {
-      const ing = ingredients.find((i) => i.id === rd.ingredient_id);
-      const unit = units.find((u) => u.id === ing?.unit_id);
+      const ing = ingredients.find((i) => i.id === rd.ingredient_id) || INITIAL_INGREDIENTS.find((i) => i.id === rd.ingredient_id);
+      const unit = units.find((u) => u.id === ing?.unit_id) || INITIAL_UNITS.find((u) => u.id === ing?.unit_id);
       return {
         ...rd,
         ingredient: ing,
