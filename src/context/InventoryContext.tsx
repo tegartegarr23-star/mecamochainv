@@ -151,6 +151,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (key === STORAGE_KEYS.MENUS && Array.isArray(parsed) && parsed.length < 50) {
         return fallback;
       }
+      // Fallback if legacy recipe details list with < 50 items
+      if (key === STORAGE_KEYS.RECIPE_DETAILS && Array.isArray(parsed) && parsed.length < 50) {
+        return fallback;
+      }
       return parsed;
     } catch {
       return fallback;
@@ -382,18 +386,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (sbRecipes && sbRecipes.length > 0) setRecipes((prev) => mergeByField(prev, sbRecipes, 'id'));
       if (recipeDetailsData && recipeDetailsData.length > 0) {
         setRecipeDetails((prev) => {
-          const combined = sanitizeRecipeDetails(mergeByField(prev, recipeDetailsData, 'id'));
+          const baseDetails = mergeByField(INITIAL_RECIPE_DETAILS, prev, 'id');
+          const combined = sanitizeRecipeDetails(mergeByField(baseDetails, recipeDetailsData, 'id'));
           
           // Identify menus/recipes that have user-saved details (rd-rec-...)
           const userSavedRecipeIds = new Set<string>();
           const userSavedMenuIds = new Set<string>();
 
+          const allRecipes = mergeByField(INITIAL_RECIPES, recipes, 'id');
+
           for (const rd of combined) {
             if (rd && rd.id && rd.id.startsWith('rd-rec-')) {
               if (rd.recipe_id) userSavedRecipeIds.add(rd.recipe_id);
-              const parts = rd.id.split('-');
-              if (parts.length >= 3) {
-                userSavedMenuIds.add(parts[2]);
+              const foundRec = allRecipes.find((r) => r.id === rd.recipe_id);
+              if (foundRec && foundRec.menu_id) {
+                userSavedMenuIds.add(foundRec.menu_id);
               }
             }
           }
@@ -404,19 +411,23 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             const isUserSaved = rd.id && rd.id.startsWith('rd-rec-');
             if (isUserSaved) return true;
 
+            const foundRec = allRecipes.find((r) => r.id === rd.recipe_id);
+            const rdMenuId = foundRec?.menu_id;
+
             const belongsToUserSavedRecipe = userSavedRecipeIds.has(rd.recipe_id);
-            const belongsToUserSavedMenu = Array.from(userSavedMenuIds).some(
-              (mId) => rd.recipe_id.includes(mId) || rd.id.includes(mId)
-            );
+            const belongsToUserSavedMenu = rdMenuId ? userSavedMenuIds.has(rdMenuId) : false;
 
             if (belongsToUserSavedRecipe || belongsToUserSavedMenu) {
-              return false; // Discard stale seed items when user has saved custom details!
+              return false; // Discard stale seed items ONLY when user has saved custom details for THIS SPECIFIC MENU!
             }
             return true;
           });
 
           return filtered;
         });
+      } else {
+        // If Supabase returned no recipe details at all, ensure seed recipe details are preserved
+        setRecipeDetails((prev) => sanitizeRecipeDetails(mergeByField(INITIAL_RECIPE_DETAILS, prev, 'id')));
       }
 
       const cleanMovements = (stockMovementsData || []).map((m) => ({
