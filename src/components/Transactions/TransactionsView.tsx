@@ -46,6 +46,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
     addProductionTransaction,
     addAdjustmentTransaction,
     deleteTransaction,
+    clearAllTransactions,
     getPrepareFormula,
     savePrepareFormula,
   } = useInventory();
@@ -59,6 +60,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
   const [selectedTrxForDetail, setSelectedTrxForDetail] = useState<Transaction | null>(null);
   const [selectedTrxForDelete, setSelectedTrxForDelete] = useState<Transaction | null>(null);
+  const [showClearAllModal, setShowClearAllModal] = useState<boolean>(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1151,6 +1153,18 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
             >
               ⚖️ Penyesuaian ({transactions.filter((t) => t.type === 'adjustment').length})
             </button>
+
+            {transactions.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowClearAllModal(true)}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 flex items-center gap-1.5 ml-auto"
+                title="Hapus seluruh riwayat transaksi"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Kosongkan Riwayat</span>
+              </button>
+            )}
           </div>
 
           {/* Toast Notification */}
@@ -1494,6 +1508,51 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
               >
                 <Trash2 className="w-4 h-4" />
                 <span>Ya, Hapus & Revert Stok</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* KOSONGKAN RIWAYAT CONFIRM MODAL */}
+      {showClearAllModal && (
+        <div className="fixed inset-0 z-50 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-stone-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-4 mb-4">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-600 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-stone-900 text-base font-serif">Kosongkan Seluruh Riwayat Transaksi?</h3>
+                <p className="text-xs text-stone-500 mt-1">
+                  Seluruh data riwayat pergerakan stok, pembelian, prepare, produksi, dan penyesuaian akan dihapus bersih dari sistem dan Supabase.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 font-medium mb-5">
+              ⚠️ Tindakan ini tidak dapat dibatalkan. Pastikan Anda telah menyimpan laporan atau data pendukung yang diperlukan.
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowClearAllModal(false)}
+                className="px-4 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await clearAllTransactions();
+                  setShowClearAllModal(false);
+                  setToastMsg('Seluruh riwayat transaksi berhasil dikosongkan.');
+                  setTimeout(() => setToastMsg(null), 4000);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Ya, Kosongkan Semua</span>
               </button>
             </div>
           </div>

@@ -99,6 +99,7 @@ interface InventoryContextType {
   
   addAdjustmentTransaction: (date: string, ingredientId: string, quantity: number, mode: 'plus' | 'minus' | 'set', reason: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other', notes: string) => void;
   deleteTransaction: (transactionId: string) => void;
+  clearAllTransactions: () => Promise<void>;
 
   // Sync & Supabase
   isSyncing: boolean;
@@ -139,10 +140,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const item = localStorage.getItem(key);
       if (!item) return fallback;
       const parsed = JSON.parse(item);
-      // Fallback if empty array for core transactions/movements/ingredients
-      if (Array.isArray(parsed) && parsed.length === 0 && Array.isArray(fallback) && fallback.length > 0) {
-        return fallback;
-      }
       // Fallback if legacy ingredients list with < 80 items
       if (key === STORAGE_KEYS.INGREDIENTS && Array.isArray(parsed) && parsed.length < 80) {
         return fallback;
@@ -463,38 +460,36 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         cost_per_unit: Number(ing.cost_per_unit ?? ing.cogs_per_unit) || 0,
       }));
 
-      // Safely merge transactions so local un-synced transactions are preserved
-      setTransactions((prev) =>
-        mergeByField(prev, cleanTransactions, 'id').sort((a, b) => {
-          const timeA = new Date(a.created_at).getTime() || 0;
-          const timeB = new Date(b.created_at).getTime() || 0;
-          if (timeB !== timeA) return timeB - timeA;
-          return String(b.id).localeCompare(String(a.id));
-        })
-      );
+      // Update transactions directly from Supabase
+      const sortedTransactions = [...cleanTransactions].sort((a, b) => {
+        const timeA = new Date(a.created_at).getTime() || 0;
+        const timeB = new Date(b.created_at).getTime() || 0;
+        if (timeB !== timeA) return timeB - timeA;
+        return String(b.id).localeCompare(String(a.id));
+      });
+      setTransactions(sortedTransactions);
+      saveToStorage(STORAGE_KEYS.TRANSACTIONS, sortedTransactions);
 
-      // Safely merge stock movements & sync ingredients current_stock live
-      setStockMovements((prev) => {
-        const mergedMovements = mergeByField(prev, cleanMovements, 'id').sort((a, b) => {
-          const timeA = new Date(a.created_at).getTime() || 0;
-          const timeB = new Date(b.created_at).getTime() || 0;
-          if (timeB !== timeA) return timeB - timeA;
-          return String(b.id).localeCompare(String(a.id));
-        });
+      // Update stock movements & sync ingredients current_stock live
+      const sortedMovements = [...cleanMovements].sort((a, b) => {
+        const timeA = new Date(a.created_at).getTime() || 0;
+        const timeB = new Date(b.created_at).getTime() || 0;
+        if (timeB !== timeA) return timeB - timeA;
+        return String(b.id).localeCompare(String(a.id));
+      });
+      setStockMovements(sortedMovements);
+      saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, sortedMovements);
 
-        setIngredients((prevIngs) => {
-          const mergedIngs = mergeByField(prevIngs, cleanIngredients, 'id').map((ing) => ({
-            ...ing,
-            current_stock: getIngredientCurrentStock(ing, mergedMovements),
-          }));
-          return mergedIngs;
-        });
-
-        return mergedMovements;
+      setIngredients((prevIngs) => {
+        const mergedIngs = mergeByField(prevIngs, cleanIngredients, 'id').map((ing) => ({
+          ...ing,
+          current_stock: getIngredientCurrentStock(ing, sortedMovements),
+        }));
+        return mergedIngs;
       });
 
-      // Automatically push all data to Supabase if Supabase transactions are empty
-      if (!sbTransactions || sbTransactions.length === 0) {
+      // Automatically push initial master data to Supabase only if ingredients table is empty
+      if (!sbIngredients || sbIngredients.length === 0) {
         pushAllToSupabase();
       } else {
         setLastSyncedAt(new Date());
@@ -1861,6 +1856,24 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
+  const clearAllTransactions = async () => {
+    setTransactions([]);
+    setStockMovements([]);
+    saveToStorage(STORAGE_KEYS.TRANSACTIONS, []);
+    saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, []);
+
+    const supabase = getSupabase();
+    if (supabase) {
+      try {
+        await supabase.from('stock_movements').delete().neq('id', '0');
+        try { await supabase.from('stock_moved').delete().neq('id', '0'); } catch {}
+        await supabase.from('transactions').delete().neq('id', '0');
+      } catch (e) {
+        console.warn('Error clearing Supabase transactions:', e);
+      }
+    }
+  };
+
   // Daily Stock Report Generator
   const getDailyStockReport = (dateFilter: string): DailyStockRow[] => {
     // Standardize filter date to local YYYY-MM-DD
@@ -2308,6 +2321,7 @@ ${recipeDetailInserts ? `INSERT INTO public.recipe_details (id, recipe_id, ingre
         addProductionTransaction,
         addAdjustmentTransaction,
         deleteTransaction,
+        clearAllTransactions,
 
         isSyncing,
         lastSyncedAt,
