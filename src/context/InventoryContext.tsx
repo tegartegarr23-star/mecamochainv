@@ -1779,50 +1779,61 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const trxToDelete = transactions.find((t) => t.id === transactionId);
     if (!trxToDelete) return;
 
-    // Find all stock movements associated with this transaction
-    const movsToDelete = stockMovements.filter(
-      (m) => m.transaction_id === transactionId
-    );
-
-    // Calculate stock changes to revert
-    // 'in' -> revert by subtracting quantity
-    // 'out' -> revert by adding quantity
-    const stockReversals: Record<string, number> = {};
-    movsToDelete.forEach((m) => {
-      if (!m.ingredient_id) return;
-      const ingKey = String(m.ingredient_id).trim();
-      if (!stockReversals[ingKey]) stockReversals[ingKey] = 0;
-      if (m.type === 'in') {
-        stockReversals[ingKey] -= Number(m.quantity) || 0;
-      } else if (m.type === 'out') {
-        stockReversals[ingKey] += Number(m.quantity) || 0;
-      }
-    });
-
-    const updatedIngredients = ingredients.map((ing) => {
-      const delta = stockReversals[ing.id] ?? stockReversals[ing.code] ?? 0;
-      if (delta !== 0) {
-        return {
-          ...ing,
-          current_stock: Number(ing.current_stock) + delta,
-        };
-      }
-      return ing;
-    });
-
     const nextTrxs = transactions.filter((t) => t.id !== transactionId);
     const nextMovs = stockMovements.filter((m) => m.transaction_id !== transactionId);
 
+    // Recalculate stock movements and ingredient current_stock from remaining movements
+    const sortedMovs = [...nextMovs].sort((a, b) => {
+      const timeA = new Date(a.created_at).getTime() || 0;
+      const timeB = new Date(b.created_at).getTime() || 0;
+      if (timeA !== timeB) return timeA - timeB;
+      return String(a.id).localeCompare(String(b.id));
+    });
+
+    // Compute running balance per ingredient
+    const runningStockMap: Record<string, number> = {};
+    const updatedMovsMap = new Map<string, StockMovement>();
+
+    for (const mov of sortedMovs) {
+      if (!mov.ingredient_id) continue;
+      const ingKey = String(mov.ingredient_id).trim().toLowerCase();
+      if (runningStockMap[ingKey] === undefined) {
+        runningStockMap[ingKey] = 0;
+      }
+      const qty = Number(mov.quantity) || 0;
+      if (mov.type === 'in') {
+        runningStockMap[ingKey] += qty;
+      } else if (mov.type === 'out') {
+        runningStockMap[ingKey] -= qty;
+      }
+      updatedMovsMap.set(mov.id, {
+        ...mov,
+        balance_after: runningStockMap[ingKey],
+      });
+    }
+
+    const updatedNextMovs = nextMovs.map((m) => updatedMovsMap.get(m.id) || m);
+
+    const updatedIngredients = ingredients.map((ing) => {
+      const ingIdKey = String(ing.id).trim().toLowerCase();
+      const ingCodeKey = String(ing.code || '').trim().toLowerCase();
+      const recalculatedStock = runningStockMap[ingIdKey] ?? runningStockMap[ingCodeKey] ?? 0;
+      return {
+        ...ing,
+        current_stock: recalculatedStock,
+      };
+    });
+
     setIngredients(updatedIngredients);
     setTransactions(nextTrxs);
-    setStockMovements(nextMovs);
+    setStockMovements(updatedNextMovs);
 
     // Save locally
     saveToStorage(STORAGE_KEYS.INGREDIENTS, updatedIngredients);
     saveToStorage(STORAGE_KEYS.TRANSACTIONS, nextTrxs);
-    saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, nextMovs);
+    saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, updatedNextMovs);
 
-    // Delete from Supabase if active
+    // Delete from Supabase if active & update ingredients
     const supabase = getSupabase();
     if (supabase) {
       (async () => {
@@ -1831,24 +1842,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           try { await supabase.from('stock_moved').delete().eq('transaction_id', transactionId); } catch {}
           await supabase.from('transactions').delete().eq('id', transactionId);
 
-          const changedIngs = updatedIngredients.filter(
-            (ing) => stockReversals[ing.id] !== undefined || stockReversals[ing.code] !== undefined
-          );
-          if (changedIngs.length > 0) {
-            const cleanIngs = changedIngs.map((ing) => ({
-              id: String(ing.id),
-              code: String(ing.code),
-              name: String(ing.name),
-              category_id: ing.category_id ? String(ing.category_id) : null,
-              unit_id: ing.unit_id ? String(ing.unit_id) : null,
-              type: ing.type || 'raw',
-              min_stock: Number(ing.min_stock) || 0,
-              current_stock: Number(ing.current_stock) || 0,
-              is_active: ing.is_active !== false,
-              cost_per_unit: Number(ing.cost_per_unit) || 0,
-            }));
-            await supabase.from('ingredients').upsert(cleanIngs);
-          }
+          const cleanIngs = updatedIngredients.map((ing) => ({
+            id: String(ing.id),
+            code: String(ing.code || ''),
+            name: String(ing.name || ''),
+            category_id: ing.category_id ? String(ing.category_id) : null,
+            unit_id: ing.unit_id ? String(ing.unit_id) : null,
+            type: ing.type || 'raw',
+            min_stock: Number(ing.min_stock) || 0,
+            current_stock: Number(ing.current_stock) || 0,
+            is_active: ing.is_active !== false,
+            cost_per_unit: Number(ing.cost_per_unit) || 0,
+          }));
+          await supabase.from('ingredients').upsert(cleanIngs);
         } catch (e) {
           console.warn('Error deleting transaction from Supabase:', e);
         }
@@ -1859,6 +1865,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const clearAllTransactions = async () => {
     setTransactions([]);
     setStockMovements([]);
+
     saveToStorage(STORAGE_KEYS.TRANSACTIONS, []);
     saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, []);
 

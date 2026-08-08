@@ -17,6 +17,7 @@ import {
   Info,
   Eye,
   X,
+  Search,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
 import { SearchableIngredientSelect } from '../Common/SearchableIngredientSelect';
@@ -57,6 +58,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   );
 
   const [historyTypeFilter, setHistoryTypeFilter] = useState<'all' | 'purchase' | 'prepare' | 'production' | 'adjustment'>('all');
+  const [historyDateFilter, setHistoryDateFilter] = useState<'all' | 'today' | 'yesterday' | 'custom'>('all');
+  const [historySelectedDate, setHistorySelectedDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [historySearchQuery, setHistorySearchQuery] = useState<string>('');
 
   const [selectedTrxForDetail, setSelectedTrxForDetail] = useState<Transaction | null>(null);
   const [selectedTrxForDelete, setSelectedTrxForDelete] = useState<Transaction | null>(null);
@@ -300,6 +304,38 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
     setAdjNotes('');
     setActiveTab('history');
   };
+
+  const getYYYYMMDD = (input?: string): string => {
+    if (!input) return '';
+    const d = new Date(input);
+    if (isNaN(d.getTime())) return String(input).slice(0, 10);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const todayYMD = getYYYYMMDD(new Date().toISOString());
+  const yesterdayYMD = getDateDaysAgo(1);
+
+  const filteredTransactions = transactions.filter((t) => {
+    if (historyTypeFilter !== 'all' && t.type !== historyTypeFilter) return false;
+
+    const tYMD = getYYYYMMDD(t.transaction_date);
+    if (historyDateFilter === 'today' && tYMD !== todayYMD) return false;
+    if (historyDateFilter === 'yesterday' && tYMD !== yesterdayYMD) return false;
+    if (historyDateFilter === 'custom' && historySelectedDate && tYMD !== historySelectedDate) return false;
+
+    if (historySearchQuery.trim()) {
+      const q = historySearchQuery.toLowerCase();
+      const matchRef = t.reference_no?.toLowerCase().includes(q);
+      const matchNotes = t.notes?.toLowerCase().includes(q);
+      const matchCreator = t.created_by?.toLowerCase().includes(q);
+      if (!matchRef && !matchNotes && !matchCreator) return false;
+    }
+
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -1091,111 +1127,204 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
       {/* HISTORY TABLE */}
       {activeTab === 'history' && (
         <div className="bg-white rounded-2xl border border-stone-200 shadow-xs overflow-hidden">
-          <div className="p-4 border-b border-stone-100 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="font-bold text-stone-900 text-sm font-serif">Riwayat Transaksi Inventaris</h3>
-              <p className="text-xs text-stone-500">Filter transaksi berdasarkan jenis untuk mempermudah audit</p>
-            </div>
-            <span className="text-xs text-stone-500 font-bold bg-stone-100 px-3 py-1 rounded-full">
-              Menampilkan {transactions.filter((t) => historyTypeFilter === 'all' || t.type === historyTypeFilter).length} dari {transactions.length} transaksi
-            </span>
-          </div>
-
-          {/* History Sub-tabs Filter Bar */}
-          <div className="flex flex-wrap items-center gap-2 p-3 bg-stone-50/70 border-b border-stone-200">
-            <button
-              onClick={() => setHistoryTypeFilter('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                historyTypeFilter === 'all'
-                  ? 'bg-stone-900 text-white shadow-xs'
-                  : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
-              }`}
-            >
-              Semua ({transactions.length})
-            </button>
-            <button
-              onClick={() => setHistoryTypeFilter('purchase')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                historyTypeFilter === 'purchase'
-                  ? 'bg-emerald-800 text-white shadow-xs'
-                  : 'bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-200'
-              }`}
-            >
-              🛒 Pembelian ({transactions.filter((t) => t.type === 'purchase').length})
-            </button>
-            <button
-              onClick={() => setHistoryTypeFilter('prepare')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                historyTypeFilter === 'prepare'
-                  ? 'bg-blue-800 text-white shadow-xs'
-                  : 'bg-white text-blue-800 hover:bg-blue-50 border border-blue-200'
-              }`}
-            >
-              🍳 Prepare ({transactions.filter((t) => t.type === 'prepare').length})
-            </button>
-            <button
-              onClick={() => setHistoryTypeFilter('production')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                historyTypeFilter === 'production'
-                  ? 'bg-amber-800 text-white shadow-xs'
-                  : 'bg-white text-amber-800 hover:bg-amber-50 border border-amber-200'
-              }`}
-            >
-              🍲 Produksi Menu ({transactions.filter((t) => t.type === 'production').length})
-            </button>
-            <button
-              onClick={() => setHistoryTypeFilter('adjustment')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                historyTypeFilter === 'adjustment'
-                  ? 'bg-purple-800 text-white shadow-xs'
-                  : 'bg-white text-purple-800 hover:bg-purple-50 border border-purple-200'
-              }`}
-            >
-              ⚖️ Penyesuaian ({transactions.filter((t) => t.type === 'adjustment').length})
-            </button>
-
-            {transactions.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowClearAllModal(true)}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 flex items-center gap-1.5 ml-auto"
-                title="Hapus seluruh riwayat transaksi"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                <span>Kosongkan Riwayat</span>
-              </button>
-            )}
-          </div>
-
-          {/* Toast Notification */}
-          {toastMsg && (
-            <div className="p-3.5 rounded-2xl bg-emerald-950 text-emerald-100 text-xs font-bold flex items-center justify-between shadow-lg animate-in fade-in slide-in-from-top-2 border border-emerald-800">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>{toastMsg}</span>
+            <div className="p-4 border-b border-stone-100 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-stone-900 text-sm font-serif">Riwayat Transaksi Inventaris</h3>
+                <p className="text-xs text-stone-500">Filter transaksi berdasarkan jenis & tanggal untuk mempermudah audit</p>
               </div>
-              <button onClick={() => setToastMsg(null)} className="text-emerald-400 hover:text-white p-1">
-                <X className="w-4 h-4" />
-              </button>
+              <span className="text-xs text-stone-500 font-bold bg-stone-100 px-3 py-1 rounded-full">
+                Menampilkan {filteredTransactions.length} dari {transactions.length} transaksi
+              </span>
             </div>
-          )}
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-stone-50 text-stone-600 font-semibold border-b border-stone-200">
-                <tr>
-                  <th className="p-3.5">Tanggal</th>
-                  <th className="p-3.5">No. Referensi</th>
-                  <th className="p-3.5">Tipe Transaksi</th>
-                  <th className="p-3.5">Rincian / Catatan</th>
-                  <th className="p-3.5">Dicatat Oleh</th>
-                  <th className="p-3.5 text-right">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100">
-                {transactions
-                  .filter((t) => historyTypeFilter === 'all' || t.type === historyTypeFilter)
-                  .map((trx) => {
+            {/* Filter Controls Bar */}
+            <div className="p-3 bg-stone-50/80 border-b border-stone-200 space-y-2.5">
+              {/* Row 1: Filter Tanggal & Search */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-semibold text-stone-500 flex items-center gap-1 mr-1">
+                    <Calendar className="w-3.5 h-3.5" /> Tanggal:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDateFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      historyDateFilter === 'all'
+                        ? 'bg-amber-800 text-white shadow-2xs'
+                        : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
+                    }`}
+                  >
+                    Semua Hari
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDateFilter('today')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      historyDateFilter === 'today'
+                        ? 'bg-amber-800 text-white shadow-2xs'
+                        : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
+                    }`}
+                  >
+                    Hari Ini
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDateFilter('yesterday')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      historyDateFilter === 'yesterday'
+                        ? 'bg-amber-800 text-white shadow-2xs'
+                        : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
+                    }`}
+                  >
+                    Kemarin
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setHistoryDateFilter('custom')}
+                      className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
+                        historyDateFilter === 'custom'
+                          ? 'bg-amber-800 text-white shadow-2xs'
+                          : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
+                      }`}
+                    >
+                      Pilih Tanggal:
+                    </button>
+                    <input
+                      type="date"
+                      value={historySelectedDate}
+                      onChange={(e) => {
+                        setHistorySelectedDate(e.target.value);
+                        setHistoryDateFilter('custom');
+                      }}
+                      className="px-2 py-0.5 text-xs rounded-lg bg-white border border-stone-200 font-medium focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Search box */}
+                <div className="relative min-w-[200px] flex-1 sm:flex-none">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400" />
+                  <input
+                    type="text"
+                    placeholder="Cari ref, catatan..."
+                    value={historySearchQuery}
+                    onChange={(e) => setHistorySearchQuery(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1 text-xs rounded-lg bg-white border border-stone-200 focus:outline-none focus:border-amber-700"
+                  />
+                  {historySearchQuery && (
+                    <button
+                      onClick={() => setHistorySearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Row 2: Type Sub-tabs & Kosongkan Button */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-stone-200/60">
+                <button
+                  onClick={() => setHistoryTypeFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                    historyTypeFilter === 'all'
+                      ? 'bg-stone-900 text-white shadow-2xs'
+                      : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
+                  }`}
+                >
+                  Semua ({transactions.length})
+                </button>
+                <button
+                  onClick={() => setHistoryTypeFilter('purchase')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                    historyTypeFilter === 'purchase'
+                      ? 'bg-emerald-800 text-white shadow-2xs'
+                      : 'bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-200'
+                  }`}
+                >
+                  🛒 Pembelian ({transactions.filter((t) => t.type === 'purchase').length})
+                </button>
+                <button
+                  onClick={() => setHistoryTypeFilter('prepare')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                    historyTypeFilter === 'prepare'
+                      ? 'bg-blue-800 text-white shadow-2xs'
+                      : 'bg-white text-blue-800 hover:bg-blue-50 border border-blue-200'
+                  }`}
+                >
+                  🍳 Prepare ({transactions.filter((t) => t.type === 'prepare').length})
+                </button>
+                <button
+                  onClick={() => setHistoryTypeFilter('production')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                    historyTypeFilter === 'production'
+                      ? 'bg-amber-800 text-white shadow-2xs'
+                      : 'bg-white text-amber-800 hover:bg-amber-50 border border-amber-200'
+                  }`}
+                >
+                  🍲 Produksi ({transactions.filter((t) => t.type === 'production').length})
+                </button>
+                <button
+                  onClick={() => setHistoryTypeFilter('adjustment')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                    historyTypeFilter === 'adjustment'
+                      ? 'bg-purple-800 text-white shadow-2xs'
+                      : 'bg-white text-purple-800 hover:bg-purple-50 border border-purple-200'
+                  }`}
+                >
+                  ⚖️ Penyesuaian ({transactions.filter((t) => t.type === 'adjustment').length})
+                </button>
+
+                {transactions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowClearAllModal(true)}
+                    className="px-2.5 py-1 rounded-lg text-xs font-bold transition-all bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 flex items-center gap-1 ml-auto"
+                    title="Hapus seluruh riwayat transaksi"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Kosongkan Riwayat</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Toast Notification */}
+            {toastMsg && (
+              <div className="p-3.5 rounded-2xl bg-emerald-950 text-emerald-100 text-xs font-bold flex items-center justify-between shadow-lg animate-in fade-in slide-in-from-top-2 border border-emerald-800">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{toastMsg}</span>
+                </div>
+                <button onClick={() => setToastMsg(null)} className="text-emerald-400 hover:text-white p-1">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-stone-50 text-stone-600 font-semibold border-b border-stone-200">
+                  <tr>
+                    <th className="p-3.5">Tanggal</th>
+                    <th className="p-3.5">No. Referensi</th>
+                    <th className="p-3.5">Tipe Transaksi</th>
+                    <th className="p-3.5">Rincian / Catatan</th>
+                    <th className="p-3.5">Dicatat Oleh</th>
+                    <th className="p-3.5 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {filteredTransactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-stone-400 font-medium">
+                        Tidak ada transaksi yang cocok dengan filter.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredTransactions.map((trx) => {
                     const typeLabel = {
                       purchase: 'Pembelian',
                       prepare: 'Prepare',
@@ -1269,7 +1398,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                         </td>
                       </tr>
                     );
-                  })}
+                  }))}
               </tbody>
             </table>
           </div>
