@@ -1449,12 +1449,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const now = Date.now();
     const trxId = `trx-pur-${now}`;
     const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
+    const actualRefNo = refNo || generateRefNo('PUR');
     const newTrx: Transaction = {
       id: trxId,
       type: 'purchase',
       transaction_date: isoDate,
-      reference_no: refNo || generateRefNo('PUR'),
-      supplier_id: supplierId,
+      reference_no: actualRefNo,
+      supplier_id: supplierId || suppliers[0]?.id || '',
       notes,
       created_by: currentUser.name,
       created_at: new Date(now).toISOString(),
@@ -1464,26 +1465,35 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const updatedIngredients = [...ingredients];
 
     items.forEach((item, index) => {
-      const ingIndex = updatedIngredients.findIndex((i) => i.id === item.ingredient_id);
+      const targetId = String(item.ingredient_id || '').trim().toLowerCase();
+      const ingIndex = updatedIngredients.findIndex(
+        (i) =>
+          String(i.id).trim().toLowerCase() === targetId ||
+          String(i.code).trim().toLowerCase() === targetId
+      );
+
       if (ingIndex !== -1) {
         const currentIng = updatedIngredients[ingIndex];
+        const realIngId = String(currentIng.id);
+        const qty = Number(item.quantity) || 0;
         const currentStock = getIngredientCurrentStock(currentIng, stockMovements);
-        const newStock = currentStock + Number(item.quantity);
+        const newStock = currentStock + qty;
+
         updatedIngredients[ingIndex] = {
           ...currentIng,
           current_stock: newStock,
-          cost_per_unit: item.unit_price > 0 ? item.unit_price : currentIng.cost_per_unit,
+          cost_per_unit: item.unit_price > 0 ? Number(item.unit_price) : Number(currentIng.cost_per_unit),
         };
 
         const supplierName = suppliers.find((s) => s.id === supplierId)?.name || 'Supplier';
         newMovements.push({
           id: `mov-${now}-${index}`,
           transaction_id: trxId,
-          ingredient_id: item.ingredient_id,
+          ingredient_id: realIngId,
           type: 'in',
-          quantity: Number(item.quantity),
+          quantity: qty,
           balance_after: newStock,
-          description: `Pembelian dari ${supplierName} (${refNo || 'PO'})`,
+          description: `Pembelian dari ${supplierName} (${actualRefNo})`,
           created_at: new Date(now + index * 10).toISOString(),
         });
       }
@@ -1496,8 +1506,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setTransactions(nextTrxs);
     setStockMovements(nextMovs);
 
+    saveToStorage(STORAGE_KEYS.INGREDIENTS, updatedIngredients);
+    saveToStorage(STORAGE_KEYS.TRANSACTIONS, nextTrxs);
+    saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, nextMovs);
+
     const changedIngs = updatedIngredients.filter((ing) =>
-      items.some((item) => item.ingredient_id === ing.id)
+      newMovements.some((m) => m.ingredient_id === ing.id)
     );
     syncDataToSupabase(changedIngs, newTrx, newMovements, nextTrxs, nextMovs);
   };
@@ -1511,11 +1525,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const now = Date.now();
     const trxId = `trx-prep-${now}`;
     const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
+    const actualRefNo = refNo || generateRefNo('PREP');
     const newTrx: Transaction = {
       id: trxId,
       type: 'prepare',
       transaction_date: isoDate,
-      reference_no: refNo || generateRefNo('PREP'),
+      reference_no: actualRefNo,
       notes,
       created_by: currentUser.name,
       created_at: new Date(now).toISOString(),
@@ -1525,10 +1540,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const updatedIngredients = [...ingredients];
 
     items.forEach((item, index) => {
-      const ingIndex = updatedIngredients.findIndex((i) => i.id === item.ingredient_id);
+      const targetId = String(item.ingredient_id || '').trim().toLowerCase();
+      const ingIndex = updatedIngredients.findIndex(
+        (i) =>
+          String(i.id).trim().toLowerCase() === targetId ||
+          String(i.code).trim().toLowerCase() === targetId
+      );
+
       if (ingIndex !== -1) {
         const currentIng = updatedIngredients[ingIndex];
-        const qty = Number(item.quantity);
+        const realIngId = String(currentIng.id);
+        const qty = Number(item.quantity) || 0;
         const currentStock = getIngredientCurrentStock(currentIng, stockMovements);
 
         let newStock = currentStock;
@@ -1537,7 +1559,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           newStock = currentStock + qty;
         } else {
           // Source raw ingredient (Out)
-          newStock = currentStock - qty;
+          newStock = Math.max(0, currentStock - qty);
         }
 
         updatedIngredients[ingIndex] = { ...currentIng, current_stock: newStock };
@@ -1545,13 +1567,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         newMovements.push({
           id: `mov-${now}-${index}`,
           transaction_id: trxId,
-          ingredient_id: item.ingredient_id,
+          ingredient_id: realIngId,
           type: item.is_target ? 'in' : 'out',
           quantity: qty,
           balance_after: newStock,
           description: item.is_target
-            ? `Hasil Proses Prepare / Konversi (${refNo || 'PREP'})`
-            : `Pemakaian Bahan Mentah untuk Prepare (${refNo || 'PREP'})`,
+            ? `Hasil Proses Prepare / Konversi (${actualRefNo})`
+            : `Pemakaian Bahan Mentah untuk Prepare (${actualRefNo})`,
           created_at: new Date(now + index * 10).toISOString(),
         });
       }
@@ -1564,8 +1586,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setTransactions(nextTrxs);
     setStockMovements(nextMovs);
 
+    saveToStorage(STORAGE_KEYS.INGREDIENTS, updatedIngredients);
+    saveToStorage(STORAGE_KEYS.TRANSACTIONS, nextTrxs);
+    saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, nextMovs);
+
     const changedIngs = updatedIngredients.filter((ing) =>
-      items.some((item) => item.ingredient_id === ing.id)
+      newMovements.some((m) => m.ingredient_id === ing.id)
     );
     syncDataToSupabase(changedIngs, newTrx, newMovements, nextTrxs, nextMovs);
   };
@@ -1575,7 +1601,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     let isSufficient = true;
 
     const items = details.map((d) => {
-      const ing = ingredients.find((i) => i.id === d.ingredient_id);
+      const ing = ingredients.find((i) => i.id === d.ingredient_id || i.code === d.ingredient_id);
       const unit = units.find((u) => u.id === ing?.unit_id);
       const requiredQty = (d.quantity || 0) * portionCount;
       const currentStock = ing ? getIngredientCurrentStock(ing, stockMovements) : 0;
@@ -1618,11 +1644,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const now = Date.now();
     const trxId = `trx-prod-${now}`;
     const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
+    const actualRefNo = refNo || generateRefNo('PROD');
     const newTrx: Transaction = {
       id: trxId,
       type: 'production',
       transaction_date: isoDate,
-      reference_no: refNo || generateRefNo('PROD'),
+      reference_no: actualRefNo,
       menu_id: menuId,
       portion_count: portionCount,
       notes,
@@ -1634,21 +1661,27 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const updatedIngredients = [...ingredients];
 
     sufficiency.items.forEach((item, index) => {
-      const ingIndex = updatedIngredients.findIndex((i) => i.id === item.ingredient.id);
+      const targetId = String(item.ingredient?.id || '').trim().toLowerCase();
+      const ingIndex = updatedIngredients.findIndex(
+        (i) =>
+          String(i.id).trim().toLowerCase() === targetId ||
+          String(i.code).trim().toLowerCase() === targetId
+      );
       if (ingIndex !== -1) {
         const currentIng = updatedIngredients[ingIndex];
+        const realIngId = String(currentIng.id);
         const currentStock = getIngredientCurrentStock(currentIng, stockMovements);
-        const newStock = currentStock - item.requiredQty;
+        const newStock = Math.max(0, currentStock - item.requiredQty);
         updatedIngredients[ingIndex] = { ...currentIng, current_stock: newStock };
 
         newMovements.push({
           id: `mov-${now}-${index}`,
           transaction_id: trxId,
-          ingredient_id: item.ingredient.id,
+          ingredient_id: realIngId,
           type: 'out',
           quantity: item.requiredQty,
           balance_after: newStock,
-          description: `Produksi / Penjualan ${portionCount} porsi ${menu.name} (${refNo || 'PROD'})`,
+          description: `Produksi / Penjualan ${portionCount} porsi ${menu.name} (${actualRefNo})`,
           created_at: new Date(now + index * 10).toISOString(),
         });
       }
@@ -1661,8 +1694,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setTransactions(nextTrxs);
     setStockMovements(nextMovs);
 
+    saveToStorage(STORAGE_KEYS.INGREDIENTS, updatedIngredients);
+    saveToStorage(STORAGE_KEYS.TRANSACTIONS, nextTrxs);
+    saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, nextMovs);
+
     const changedIngs = updatedIngredients.filter((ing) =>
-      sufficiency.items.some((item) => item.ingredient.id === ing.id)
+      newMovements.some((m) => m.ingredient_id === ing.id)
     );
     syncDataToSupabase(changedIngs, newTrx, newMovements, nextTrxs, nextMovs);
 

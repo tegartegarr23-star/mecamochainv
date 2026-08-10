@@ -1366,27 +1366,30 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                     }[trx.type];
 
                     let detailText = trx.notes || '-';
+                    const trxMovs = stockMovements.filter(
+                      (m) =>
+                        m.transaction_id === trx.id ||
+                        (trx.reference_no && m.description && m.description.includes(trx.reference_no))
+                    );
+
                     if (trx.type === 'purchase') {
                       const supplier = suppliers.find((s) => s.id === trx.supplier_id);
-                      const movs = stockMovements.filter((m) => m.transaction_id === trx.id);
                       const supplierName = supplier ? supplier.name : 'Supplier';
-                      detailText = `Pembelian dari ${supplierName} (${movs.length > 0 ? `${movs.length} jenis bahan` : 'Bahan Baku'})${trx.notes ? ` - ${trx.notes}` : ''}`;
+                      detailText = `Pembelian dari ${supplierName} (${trxMovs.length > 0 ? `${trxMovs.length} jenis bahan` : 'Bahan Baku'})${trx.notes ? ` - ${trx.notes}` : ''}`;
                     } else if (trx.type === 'prepare') {
-                      const movs = stockMovements.filter((m) => m.transaction_id === trx.id);
-                      const targetMov = movs.find((m) => m.type === 'in');
+                      const targetMov = trxMovs.find((m) => m.type === 'in');
                       const targetIng = ingredients.find((i) => i.id === targetMov?.ingredient_id || i.code === targetMov?.ingredient_id);
-                      const sourceCount = movs.filter((m) => m.type === 'out').length;
+                      const sourceCount = trxMovs.filter((m) => m.type === 'out').length;
                       const targetName = targetIng ? targetIng.name : 'Bahan PP';
                       detailText = `Prepare ${targetName} (+${formatNumber(targetMov?.quantity || 0)}) dari ${sourceCount} bahan mentah${trx.notes ? ` - ${trx.notes}` : ''}`;
                     } else if (trx.type === 'production') {
                       const menu = menus.find((m) => m.id === trx.menu_id);
                       detailText = `Produksi ${trx.portion_count || 1} porsi ${menu ? menu.name : 'Menu'}${trx.notes ? ` (${trx.notes})` : ''}`;
                     } else if (trx.type === 'adjustment') {
-                      const movs = stockMovements.filter((m) => m.transaction_id === trx.id);
-                      const adjIng = ingredients.find((i) => i.id === movs[0]?.ingredient_id || i.code === movs[0]?.ingredient_id);
+                      const adjIng = ingredients.find((i) => i.id === trxMovs[0]?.ingredient_id || i.code === trxMovs[0]?.ingredient_id);
                       const ingName = adjIng ? adjIng.name : 'Bahan';
-                      const moveType = movs[0]?.type === 'in' ? '+' : '-';
-                      detailText = `Penyesuaian ${ingName} (${moveType}${formatNumber(movs[0]?.quantity || 0)}) [${trx.adjustment_reason || 'Opname'}]${trx.notes ? ` - ${trx.notes}` : ''}`;
+                      const moveType = trxMovs[0]?.type === 'in' ? '+' : '-';
+                      detailText = `Penyesuaian ${ingName} (${moveType}${formatNumber(trxMovs[0]?.quantity || 0)}) [${trx.adjustment_reason || 'Opname'}]${trx.notes ? ` - ${trx.notes}` : ''}`;
                     }
 
                     return (
@@ -1528,7 +1531,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                     </thead>
                     <tbody className="divide-y divide-stone-100">
                       {stockMovements
-                        .filter((m) => m.transaction_id === selectedTrxForDetail.id)
+                        .filter(
+                          (m) =>
+                            m.transaction_id === selectedTrxForDetail.id ||
+                            (selectedTrxForDetail.reference_no &&
+                              m.description &&
+                              m.description.includes(selectedTrxForDetail.reference_no))
+                        )
                         .map((mov) => {
                           const ing = ingredients.find((i) => i.id === mov.ingredient_id || i.code === mov.ingredient_id);
                           const unit = units.find((u) => u.id === ing?.unit_id);
@@ -1620,7 +1629,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
               <h4 className="text-xs font-bold text-stone-800 mb-2">Daftar Perubahan Stok Yang Akan Di-revert:</h4>
               <div className="space-y-1.5 max-h-48 overflow-y-auto">
                 {stockMovements
-                  .filter((m) => m.transaction_id === selectedTrxForDelete.id)
+                  .filter(
+                    (m) =>
+                      m.transaction_id === selectedTrxForDelete.id ||
+                      (selectedTrxForDelete.reference_no &&
+                        m.description &&
+                        m.description.includes(selectedTrxForDelete.reference_no))
+                  )
                   .map((mov) => {
                     const ing = ingredients.find((i) => i.id === mov.ingredient_id || i.code === mov.ingredient_id);
                     const unit = units.find((u) => u.id === ing?.unit_id);
