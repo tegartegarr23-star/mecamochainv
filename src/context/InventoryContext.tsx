@@ -292,11 +292,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               String(i.code).toLowerCase() === String(m.ingredient_id).toLowerCase()
           );
           const ingId = foundIng ? String(foundIng.id) : String(m.ingredient_id);
-          const validTrx = m.transaction_id && allTrxs.some((t) => t.id === m.transaction_id);
+          let targetTrxId = m.transaction_id;
+          if (!targetTrxId && m.description && allTrxs.length > 0) {
+            const match = allTrxs.find((t) => t.reference_no && m.description?.includes(t.reference_no));
+            if (match) targetTrxId = match.id;
+          }
+          const validTrx = targetTrxId && allTrxs.some((t) => t.id === targetTrxId);
 
           return {
             id: String(m.id),
-            transaction_id: validTrx ? String(m.transaction_id) : null,
+            transaction_id: validTrx ? String(targetTrxId) : null,
             ingredient_id: ingId,
             type: String(m.type),
             quantity: Number(m.quantity) || 0,
@@ -427,18 +432,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setRecipeDetails((prev) => sanitizeRecipeDetails(mergeByField(INITIAL_RECIPE_DETAILS, prev, 'id')));
       }
 
-      const cleanMovements = (stockMovementsData || []).map((m) => ({
-        ...m,
-        id: String(m.id),
-        transaction_id: m.transaction_id ? String(m.transaction_id) : undefined,
-        ingredient_id: String(m.ingredient_id),
-        type: String(m.type) as 'in' | 'out',
-        quantity: Number(m.quantity) || 0,
-        balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : undefined,
-        description: m.description || '',
-        created_at: m.created_at || new Date().toISOString(),
-      }));
-
       const cleanTransactions = (sbTransactions || []).map((t) => ({
         ...t,
         id: String(t.id),
@@ -450,6 +443,27 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         created_at: t.created_at || new Date().toISOString(),
       }));
 
+      const cleanMovements = (stockMovementsData || []).map((m) => {
+        let trxId = m.transaction_id ? String(m.transaction_id) : undefined;
+        if (!trxId && m.description && cleanTransactions.length > 0) {
+          const match = cleanTransactions.find(
+            (t) => t.reference_no && m.description.includes(t.reference_no)
+          );
+          if (match) trxId = match.id;
+        }
+        return {
+          ...m,
+          id: String(m.id),
+          transaction_id: trxId,
+          ingredient_id: String(m.ingredient_id),
+          type: String(m.type) as 'in' | 'out',
+          quantity: Number(m.quantity) || 0,
+          balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : undefined,
+          description: m.description || '',
+          created_at: m.created_at || new Date().toISOString(),
+        };
+      });
+
       const cleanIngredients = (sbIngredients || []).map((ing) => ({
         ...ing,
         id: String(ing.id),
@@ -460,30 +474,51 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         cost_per_unit: Number(ing.cost_per_unit ?? ing.cogs_per_unit) || 0,
       }));
 
-      // Update transactions directly from Supabase
-      const sortedTransactions = [...cleanTransactions].sort((a, b) => {
-        const timeA = new Date(a.created_at).getTime() || 0;
-        const timeB = new Date(b.created_at).getTime() || 0;
-        if (timeB !== timeA) return timeB - timeA;
-        return String(b.id).localeCompare(String(a.id));
+      // Update transactions preserving local newly created transactions
+      let currentTransactionsList = cleanTransactions;
+      setTransactions((prevTrxs) => {
+        const merged = mergeByField(prevTrxs, cleanTransactions, 'id');
+        const sorted = [...merged].sort((a, b) => {
+          const timeA = new Date(a.created_at).getTime() || 0;
+          const timeB = new Date(b.created_at).getTime() || 0;
+          if (timeB !== timeA) return timeB - timeA;
+          return String(b.id).localeCompare(String(a.id));
+        });
+        currentTransactionsList = sorted;
+        saveToStorage(STORAGE_KEYS.TRANSACTIONS, sorted);
+        return sorted;
       });
-      setTransactions(sortedTransactions);
-      saveToStorage(STORAGE_KEYS.TRANSACTIONS, sortedTransactions);
 
-      // Update stock movements & sync ingredients current_stock live
-      const sortedMovements = [...cleanMovements].sort((a, b) => {
-        const timeA = new Date(a.created_at).getTime() || 0;
-        const timeB = new Date(b.created_at).getTime() || 0;
-        if (timeB !== timeA) return timeB - timeA;
-        return String(b.id).localeCompare(String(a.id));
+      // Update stock movements preserving local movements & healing missing transaction_ids
+      let currentMovementsList = cleanMovements;
+      setStockMovements((prevMovs) => {
+        const merged = mergeByField(prevMovs, cleanMovements, 'id');
+        const healed = merged.map((m) => {
+          let trxId = m.transaction_id;
+          if (!trxId && m.description && currentTransactionsList.length > 0) {
+            const match = currentTransactionsList.find(
+              (t) => t.reference_no && m.description.includes(t.reference_no)
+            );
+            if (match) trxId = match.id;
+          }
+          return { ...m, transaction_id: trxId };
+        });
+
+        const sorted = [...healed].sort((a, b) => {
+          const timeA = new Date(a.created_at).getTime() || 0;
+          const timeB = new Date(b.created_at).getTime() || 0;
+          if (timeB !== timeA) return timeB - timeA;
+          return String(b.id).localeCompare(String(a.id));
+        });
+        currentMovementsList = sorted;
+        saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, sorted);
+        return sorted;
       });
-      setStockMovements(sortedMovements);
-      saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, sortedMovements);
 
       setIngredients((prevIngs) => {
         const mergedIngs = mergeByField(prevIngs, cleanIngredients, 'id').map((ing) => ({
           ...ing,
-          current_stock: getIngredientCurrentStock(ing, sortedMovements),
+          current_stock: getIngredientCurrentStock(ing, currentMovementsList),
         }));
         return mergedIngs;
       });
@@ -1466,11 +1501,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     items.forEach((item, index) => {
       const targetId = String(item.ingredient_id || '').trim().toLowerCase();
-      const ingIndex = updatedIngredients.findIndex(
+      let ingIndex = updatedIngredients.findIndex(
         (i) =>
           String(i.id).trim().toLowerCase() === targetId ||
           String(i.code).trim().toLowerCase() === targetId
       );
+
+      if (ingIndex === -1 && updatedIngredients.length > 0) {
+        ingIndex = 0;
+      }
 
       if (ingIndex !== -1) {
         const currentIng = updatedIngredients[ingIndex];

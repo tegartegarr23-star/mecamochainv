@@ -255,20 +255,87 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   const [adjNotes, setAdjNotes] = useState('');
 
   useEffect(() => {
-    if (ingredients.length > 0 && (!adjIngredientId || !ingredients.some((i) => i.id === adjIngredientId))) {
-      setAdjIngredientId(ingredients[0].id);
+    if (ingredients.length > 0) {
+      setPurItems((prev) => {
+        if (!prev || prev.length === 0) {
+          const firstIng = ingredients[0];
+          return [{ ingredient_id: firstIng.id, quantity: 100, unit_price: firstIng.cost_per_unit || 0 }];
+        }
+        return prev.map((item) => {
+          if (!item.ingredient_id || !ingredients.some((i) => i.id === item.ingredient_id || i.code === item.ingredient_id)) {
+            const firstIng = ingredients[0];
+            return {
+              ...item,
+              ingredient_id: firstIng.id,
+              unit_price: item.unit_price || firstIng.cost_per_unit || 0,
+            };
+          }
+          return item;
+        });
+      });
+
+      if (!prepTargetIngId || !ingredients.some((i) => i.id === prepTargetIngId)) {
+        const prep = ingredients.find((i) => i.type === 'prepared') || ingredients[0];
+        if (prep) setPrepTargetIngId(prep.id);
+      }
+
+      if (!adjIngredientId || !ingredients.some((i) => i.id === adjIngredientId)) {
+        setAdjIngredientId(ingredients[0].id);
+      }
     }
-  }, [ingredients, adjIngredientId]);
+  }, [ingredients]);
+
+  useEffect(() => {
+    if (suppliers.length > 0 && (!purSupplierId || !suppliers.some((s) => s.id === purSupplierId))) {
+      setPurSupplierId(suppliers[0].id);
+    }
+  }, [suppliers]);
+
+  useEffect(() => {
+    if (menus.length > 0 && (!prodMenuId || !menus.some((m) => m.id === prodMenuId))) {
+      setProdMenuId(menus[0].id);
+    }
+  }, [menus]);
 
   // Submit Purchase
   const handlePurchaseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (purItems.length === 0) return;
+    if (ingredients.length === 0) {
+      alert('Data bahan baku belum tersedia. Tambahkan bahan baku terlebih dahulu!');
+      return;
+    }
 
-    addPurchaseTransaction(purDate, purSupplierId, purRefNo, purNotes, purItems);
-    alert('Transaksi Pembelian berhasil disimpan. Stok bahan baku bertambah!');
+    const sanitizedItems = purItems
+      .map((item) => {
+        let ingId = item.ingredient_id;
+        if (!ingId || !ingredients.some((i) => i.id === ingId || i.code === ingId)) {
+          ingId = ingredients[0]?.id || '';
+        }
+        const ing = ingredients.find((i) => i.id === ingId || i.code === ingId);
+        return {
+          ingredient_id: ingId,
+          quantity: Number(item.quantity) || 0,
+          unit_price: Number(item.unit_price) > 0 ? Number(item.unit_price) : Number(ing?.cost_per_unit || 0),
+        };
+      })
+      .filter((item) => item.ingredient_id && item.quantity > 0);
+
+    if (sanitizedItems.length === 0) {
+      alert('Mohon tentukan minimal 1 bahan baku yang valid dengan kuantitas lebih dari 0.');
+      return;
+    }
+
+    const supplierToUse = purSupplierId || suppliers[0]?.id || '';
+
+    addPurchaseTransaction(purDate, supplierToUse, purRefNo, purNotes, sanitizedItems);
+    alert('Transaksi Pembelian berhasil disimpan! Stok bahan baku telah bertambah.');
+
     setPurRefNo(generateRefNo('PUR'));
     setPurNotes('');
+    const firstIng = ingredients[0];
+    setPurItems([
+      { ingredient_id: firstIng?.id || '', quantity: 100, unit_price: firstIng?.cost_per_unit || 0 },
+    ]);
     setActiveTab('history');
   };
 
@@ -1530,15 +1597,29 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100">
-                      {stockMovements
-                        .filter(
+                      {(() => {
+                        const trxMovs = stockMovements.filter(
                           (m) =>
                             m.transaction_id === selectedTrxForDetail.id ||
                             (selectedTrxForDetail.reference_no &&
                               m.description &&
                               m.description.includes(selectedTrxForDetail.reference_no))
-                        )
-                        .map((mov) => {
+                        );
+
+                        if (trxMovs.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={4} className="p-6 text-center text-stone-500">
+                                <p className="font-bold text-stone-700 text-xs mb-1">Tidak Ada Rincian Pergerakan Stok</p>
+                                <p className="text-[11px] text-stone-400">
+                                  Transaksi ini dibuat tanpa mencatat item bahan baku atau mutasi stoknya telah terhapus.
+                                </p>
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return trxMovs.map((mov) => {
                           const ing = ingredients.find((i) => i.id === mov.ingredient_id || i.code === mov.ingredient_id);
                           const unit = units.find((u) => u.id === ing?.unit_id);
                           const isIn = mov.type === 'in';
@@ -1566,7 +1647,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                               </td>
                             </tr>
                           );
-                        })}
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
