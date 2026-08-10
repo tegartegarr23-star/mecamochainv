@@ -248,11 +248,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
   // 4. Adjustment Form State
   const [adjDate, setAdjDate] = useState(new Date().toISOString().slice(0, 10));
-  const [adjIngredientId, setAdjIngredientId] = useState(ingredients[0]?.id || '');
-  const [adjQty, setAdjQty] = useState(0);
-  const [adjMode, setAdjMode] = useState<'plus' | 'minus' | 'set'>('set');
-  const [adjReason, setAdjReason] = useState<'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other'>('Stock Opname');
+  const [adjIngredientId, setAdjIngredientId] = useState('');
+  const [adjQty, setAdjQty] = useState<number | ''>('');
+  const [adjMode, setAdjMode] = useState<'plus' | 'minus' | 'set'>('minus');
+  const [adjReason, setAdjReason] = useState<'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other'>('Damage');
   const [adjNotes, setAdjNotes] = useState('');
+
+  useEffect(() => {
+    if (ingredients.length > 0 && (!adjIngredientId || !ingredients.some((i) => i.id === adjIngredientId))) {
+      setAdjIngredientId(ingredients[0].id);
+    }
+  }, [ingredients, adjIngredientId]);
 
   // Submit Purchase
   const handlePurchaseSubmit = (e: React.FormEvent) => {
@@ -299,8 +305,20 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   // Submit Adjustment
   const handleAdjustmentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    addAdjustmentTransaction(adjDate, adjIngredientId, adjQty, adjMode, adjReason, adjNotes);
+    const targetIngId = adjIngredientId || ingredients[0]?.id || '';
+    const numQty = Number(adjQty);
+    if (!targetIngId) {
+      alert('Pilih bahan baku terlebih dahulu.');
+      return;
+    }
+    if (adjQty === '' || isNaN(numQty) || numQty < 0) {
+      alert('Masukkan kuantitas penyesuaian yang valid.');
+      return;
+    }
+
+    addAdjustmentTransaction(adjDate, targetIngId, numQty, adjMode, adjReason, adjNotes);
     alert('Penyesuaian stok berhasil disimpan!');
+    setAdjQty('');
     setAdjNotes('');
     setActiveTab('history');
   };
@@ -1039,7 +1057,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                   step="any"
                   required
                   value={adjQty}
-                  onChange={(e) => setAdjQty(Number(e.target.value))}
+                  onChange={(e) => setAdjQty(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder={adjMode === 'set' ? "Total stok fisik hasil opname" : "Kuantitas"}
                   className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                 />
               </div>
@@ -1050,14 +1069,18 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                   onChange={(e) => {
                     const r = e.target.value as 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other';
                     setAdjReason(r);
-                    if (r === 'Stock Opname') setAdjMode('set');
+                    if (r === 'Stock Opname') {
+                      setAdjMode('set');
+                    } else if (r === 'Damage' || r === 'Expired' || r === 'Loss') {
+                      setAdjMode('minus');
+                    }
                   }}
                   className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                 >
-                  <option value="Stock Opname">Stock Opname (Hasil Cek Fisik)</option>
                   <option value="Damage">Damage (Kerusakan)</option>
                   <option value="Expired">Expired (Kadaluwarsa)</option>
                   <option value="Loss">Loss (Kehilangan)</option>
+                  <option value="Stock Opname">Stock Opname (Hasil Cek Fisik)</option>
                   <option value="Other">Lainnya</option>
                 </select>
               </div>
@@ -1068,14 +1091,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
               const currentIng = ingredients.find((i) => i.id === adjIngredientId) || ingredients[0];
               if (!currentIng) return null;
 
+              const numQty = Number(adjQty) || 0;
+              const currentStock = Number(currentIng.current_stock) || 0;
+
               const targetStock =
                 adjMode === 'set'
-                  ? adjQty
+                  ? numQty
                   : adjMode === 'plus'
-                  ? currentIng.current_stock + adjQty
-                  : currentIng.current_stock - adjQty;
+                  ? currentStock + numQty
+                  : Math.max(0, currentStock - numQty);
 
-              const diff = targetStock - currentIng.current_stock;
+              const diff = targetStock - currentStock;
 
               return (
                 <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-900 font-medium">
