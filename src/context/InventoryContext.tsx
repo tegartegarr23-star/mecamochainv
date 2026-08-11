@@ -1515,7 +1515,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const currentIng = updatedIngredients[ingIndex];
         const realIngId = String(currentIng.id);
         const qty = Number(item.quantity) || 0;
-        const currentStock = getIngredientCurrentStock(currentIng, stockMovements);
+        const currentStock = getIngredientCurrentStock(currentIng, [...newMovements, ...stockMovements]);
         const newStock = currentStock + qty;
 
         updatedIngredients[ingIndex] = {
@@ -1590,7 +1590,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const currentIng = updatedIngredients[ingIndex];
         const realIngId = String(currentIng.id);
         const qty = Number(item.quantity) || 0;
-        const currentStock = getIngredientCurrentStock(currentIng, stockMovements);
+        const currentStock = getIngredientCurrentStock(currentIng, [...newMovements, ...stockMovements]);
 
         let newStock = currentStock;
         if (item.is_target) {
@@ -1709,7 +1709,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (ingIndex !== -1) {
         const currentIng = updatedIngredients[ingIndex];
         const realIngId = String(currentIng.id);
-        const currentStock = getIngredientCurrentStock(currentIng, stockMovements);
+        const currentStock = getIngredientCurrentStock(currentIng, [...newMovements, ...stockMovements]);
         const newStock = currentStock - item.requiredQty;
         updatedIngredients[ingIndex] = { ...currentIng, current_stock: newStock };
 
