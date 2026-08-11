@@ -1166,7 +1166,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                   ? numQty
                   : adjMode === 'plus'
                   ? currentStock + numQty
-                  : Math.max(0, currentStock - numQty);
+                  : currentStock - numQty;
 
               const diff = targetStock - currentStock;
 

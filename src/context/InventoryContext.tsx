@@ -1598,7 +1598,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           newStock = currentStock + qty;
         } else {
           // Source raw ingredient (Out)
-          newStock = Math.max(0, currentStock - qty);
+          newStock = currentStock - qty;
         }
 
         updatedIngredients[ingIndex] = { ...currentIng, current_stock: newStock };
@@ -1710,7 +1710,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const currentIng = updatedIngredients[ingIndex];
         const realIngId = String(currentIng.id);
         const currentStock = getIngredientCurrentStock(currentIng, stockMovements);
-        const newStock = Math.max(0, currentStock - item.requiredQty);
+        const newStock = currentStock - item.requiredQty;
         updatedIngredients[ingIndex] = { ...currentIng, current_stock: newStock };
 
         newMovements.push({
@@ -1793,7 +1793,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const refNo = generateRefNo('ADJ');
     const qty = Math.max(0, Number(quantity) || 0);
 
-    const currentStock = Number(ing.current_stock) || 0;
+    const currentStock = getIngredientCurrentStock(ing, stockMovements);
 
     let newStock = currentStock;
     let moveQty = qty;
@@ -1809,7 +1809,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       moveType = 'in';
       moveQty = qty;
     } else {
-      newStock = Math.max(0, currentStock - qty);
+      newStock = currentStock - qty;
       moveType = 'out';
       moveQty = qty;
     }
@@ -1882,13 +1882,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     });
 
+    const nextTrxs = transactions.filter((t) => t.id !== transactionId);
+    const nextMovs = stockMovements.filter((m) => m.transaction_id !== transactionId);
+
     const updatedIngredients = ingredients.map((ing) => {
       const ingIdKey = String(ing.id).trim().toLowerCase();
       const ingCodeKey = String(ing.code || '').trim().toLowerCase();
 
       const delta = stockDeltas[ingIdKey] ?? stockDeltas[ingCodeKey] ?? 0;
       if (delta !== 0) {
-        const newStock = Math.max(0, (Number(ing.current_stock) || 0) + delta);
+        const newStock = getIngredientCurrentStock(ing, nextMovs);
         return {
           ...ing,
           current_stock: newStock,
@@ -1896,9 +1899,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
       return ing;
     });
-
-    const nextTrxs = transactions.filter((t) => t.id !== transactionId);
-    const nextMovs = stockMovements.filter((m) => m.transaction_id !== transactionId);
 
     setIngredients(updatedIngredients);
     setTransactions(nextTrxs);
