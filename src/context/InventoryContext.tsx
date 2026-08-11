@@ -1863,10 +1863,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (!trxToDelete) return;
 
     // Find stock movements associated with this transaction
-    const movsToDelete = stockMovements.filter((m) => m.transaction_id === transactionId);
+    const movsToDelete = stockMovements.filter((m) => {
+      if (!m) return false;
+      if (m.transaction_id === transactionId) return true;
+      if (trxToDelete.reference_no && m.description && m.description.includes(trxToDelete.reference_no)) return true;
+      return false;
+    });
 
     // Calculate stock reversal deltas ONLY for ingredients in this transaction
     const stockDeltas: Record<string, number> = {};
+    const deletedMovTimes: Record<string, number> = {};
+
     movsToDelete.forEach((m) => {
       if (!m.ingredient_id) return;
       const key = String(m.ingredient_id).trim().toLowerCase();
@@ -1880,18 +1887,44 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } else if (m.type === 'out') {
         stockDeltas[key] += qty;
       }
+
+      const movTime = new Date(m.created_at).getTime() || 0;
+      if (!deletedMovTimes[key] || movTime < deletedMovTimes[key]) {
+        deletedMovTimes[key] = movTime;
+      }
     });
 
     const nextTrxs = transactions.filter((t) => t.id !== transactionId);
-    const nextMovs = stockMovements.filter((m) => m.transaction_id !== transactionId);
+    let nextMovs = stockMovements.filter((m) => !movsToDelete.some((delM) => delM.id === m.id));
 
+    // Update balance_after for movements occurring AT or AFTER the deleted movement
+    nextMovs = nextMovs.map((m) => {
+      if (!m.ingredient_id) return m;
+      const key = String(m.ingredient_id).trim().toLowerCase();
+      const delta = stockDeltas[key];
+      if (delta !== undefined && delta !== 0) {
+        const movTime = new Date(m.created_at).getTime() || 0;
+        const delTime = deletedMovTimes[key] || 0;
+        if (movTime >= delTime) {
+          const oldBal = Number(m.balance_after) || 0;
+          return {
+            ...m,
+            balance_after: oldBal + delta,
+          };
+        }
+      }
+      return m;
+    });
+
+    // Calculate updated stock for each ingredient directly by applying reversal delta
     const updatedIngredients = ingredients.map((ing) => {
       const ingIdKey = String(ing.id).trim().toLowerCase();
       const ingCodeKey = String(ing.code || '').trim().toLowerCase();
 
       const delta = stockDeltas[ingIdKey] ?? stockDeltas[ingCodeKey] ?? 0;
       if (delta !== 0) {
-        const newStock = getIngredientCurrentStock(ing, nextMovs);
+        const currentStock = Number(ing.current_stock) || 0;
+        const newStock = currentStock + delta;
         return {
           ...ing,
           current_stock: newStock,
@@ -1909,14 +1942,36 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     saveToStorage(STORAGE_KEYS.TRANSACTIONS, nextTrxs);
     saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, nextMovs);
 
-    // Delete from Supabase if active & update affected ingredients
+    // Delete from Supabase if active & update affected ingredients and movements
     const supabase = getSupabase();
     if (supabase) {
       (async () => {
         try {
           await supabase.from('stock_movements').delete().eq('transaction_id', transactionId);
           try { await supabase.from('stock_moved').delete().eq('transaction_id', transactionId); } catch {}
+          if (trxToDelete.reference_no) {
+            try { await supabase.from('stock_movements').delete().ilike('description', `%${trxToDelete.reference_no}%`); } catch {}
+          }
           await supabase.from('transactions').delete().eq('id', transactionId);
+
+          // Update remaining movements whose balance_after was shifted
+          const affectedMovs = nextMovs.filter((m) => {
+            const key = String(m.ingredient_id).trim().toLowerCase();
+            return stockDeltas[key] !== undefined;
+          });
+          if (affectedMovs.length > 0) {
+            const cleanMovs = affectedMovs.map((m) => ({
+              id: String(m.id),
+              transaction_id: String(m.transaction_id),
+              ingredient_id: String(m.ingredient_id),
+              type: m.type,
+              quantity: Number(m.quantity) || 0,
+              balance_after: Number(m.balance_after) || 0,
+              description: String(m.description || ''),
+              created_at: m.created_at,
+            }));
+            await supabase.from('stock_movements').upsert(cleanMovs);
+          }
 
           const changedIngs = updatedIngredients.filter((ing) => {
             const ingIdKey = String(ing.id).trim().toLowerCase();
@@ -1947,9 +2002,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const clearAllTransactions = async () => {
+    // Reset all ingredients stock to 0 when clearing all transactions
+    const resetIngredients = ingredients.map((ing) => ({
+      ...ing,
+      current_stock: 0,
+    }));
+
+    setIngredients(resetIngredients);
     setTransactions([]);
     setStockMovements([]);
 
+    saveToStorage(STORAGE_KEYS.INGREDIENTS, resetIngredients);
     saveToStorage(STORAGE_KEYS.TRANSACTIONS, []);
     saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, []);
 
@@ -1959,6 +2022,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         await supabase.from('stock_movements').delete().neq('id', '0');
         try { await supabase.from('stock_moved').delete().neq('id', '0'); } catch {}
         await supabase.from('transactions').delete().neq('id', '0');
+
+        const cleanIngs = resetIngredients.map((ing) => ({
+          id: String(ing.id),
+          code: String(ing.code || ''),
+          name: String(ing.name || ''),
+          category_id: ing.category_id ? String(ing.category_id) : null,
+          unit_id: ing.unit_id ? String(ing.unit_id) : null,
+          type: ing.type || 'raw',
+          min_stock: Number(ing.min_stock) || 0,
+          current_stock: 0,
+          is_active: ing.is_active !== false,
+          cost_per_unit: Number(ing.cost_per_unit) || 0,
+        }));
+        await supabase.from('ingredients').upsert(cleanIngs);
       } catch (e) {
         console.warn('Error clearing Supabase transactions:', e);
       }
