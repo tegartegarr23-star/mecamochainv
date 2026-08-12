@@ -310,9 +310,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
         if (prep) setPrepTargetIngId(prep.id);
       }
 
-      if (!adjIngredientId || !ingredients.some((i) => i.id === adjIngredientId)) {
-        setAdjIngredientId(ingredients[0].id);
-      }
+      setAdjItems((prev) => {
+        if (!prev || prev.length === 0) {
+          return [{ ingredient_id: ingredients[0].id, quantity: '', mode: 'set', item_notes: '' }];
+        }
+        return prev.map((item) => {
+          if (!item.ingredient_id || !ingredients.some((i) => i.id === item.ingredient_id || i.code === item.ingredient_id)) {
+            return { ...item, ingredient_id: ingredients[0].id };
+          }
+          return item;
+        });
+      });
     }
   }, [ingredients]);
 
@@ -323,8 +331,18 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   }, [suppliers]);
 
   useEffect(() => {
-    if (menus.length > 0 && (!prodMenuId || !menus.some((m) => m.id === prodMenuId))) {
-      setProdMenuId(menus[0].id);
+    if (menus.length > 0) {
+      setProdItems((prev) => {
+        if (!prev || prev.length === 0) {
+          return [{ menu_id: menus[0].id, portion_count: 5 }];
+        }
+        return prev.map((item) => {
+          if (!item.menu_id || !menus.some((m) => m.id === item.menu_id)) {
+            return { ...item, menu_id: menus[0].id };
+          }
+          return item;
+        });
+      });
     }
   }, [menus]);
 
