@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   FileSpreadsheet,
   Download,
@@ -10,10 +10,14 @@ import {
   ArrowUpRight,
   BookOpen,
   RefreshCw,
+  ShoppingBag,
+  TrendingUp,
+  Utensils,
+  CheckCircle2,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
 import { SearchableIngredientSelect } from '../Common/SearchableIngredientSelect';
-import { formatNumber, formatDate } from '../../utils/formatters';
+import { formatNumber, formatDate, formatCurrency } from '../../utils/formatters';
 import {
   exportDailyStockToExcel,
   exportDailyStockToPDF,
@@ -22,11 +26,11 @@ import {
 } from '../../utils/export';
 
 export const ReportsView: React.FC = () => {
-  const { ingredients, units, getDailyStockReport, getIngredientLedger, pullFromSupabase, isSyncing } = useInventory();
+  const { ingredients, units, menus, transactions, getDailyStockReport, getIngredientLedger, pullFromSupabase, isSyncing } = useInventory();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Tab: Stock Report vs Ledger
-  const [reportTab, setReportTab] = useState<'daily' | 'ledger'>('daily');
+  // Tab: Stock Report vs Ledger vs Sales Report
+  const [reportTab, setReportTab] = useState<'daily' | 'ledger' | 'sales'>('daily');
 
   // Daily Report State
   const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
@@ -35,11 +39,33 @@ export const ReportsView: React.FC = () => {
   // Ledger State
   const [selectedIngredientId, setSelectedIngredientId] = useState(ingredients[0]?.id || '');
 
+  // Menu Sales Report State
+  const [salesDateFilter, setSalesDateFilter] = useState<'all' | 'today' | 'yesterday' | 'custom'>('all');
+  const [salesCustomDate, setSalesCustomDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [salesSearchFilter, setSalesSearchFilter] = useState('');
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     await pullFromSupabase();
     setTimeout(() => setIsRefreshing(false), 500);
   };
+
+  const getYYYYMMDD = (input?: string): string => {
+    if (!input) return '';
+    const d = new Date(input);
+    if (isNaN(d.getTime())) return String(input).slice(0, 10);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const todayYMD = getYYYYMMDD(new Date().toISOString());
+  const yesterdayYMD = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return getYYYYMMDD(d.toISOString());
+  })();
 
   const dailyReportData = getDailyStockReport(reportDate).filter((row) =>
     row.ingredient.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
@@ -50,11 +76,61 @@ export const ReportsView: React.FC = () => {
   const selectedUnit = units.find((u) => u.id === selectedIngredient?.unit_id) || ({ name: '-', abbreviation: '-' } as any);
   const ledgerMovements = getIngredientLedger(selectedIngredientId);
 
+  // Menu Sales Report Data
+  const menuSalesData = useMemo(() => {
+    const map = new Map<string, { menuName: string; category: string; price: number; totalPortions: number; totalTrx: number; revenue: number }>();
+
+    // Pre-populate with registered menus
+    menus.forEach((m) => {
+      map.set(m.id, {
+        menuName: m.name,
+        category: m.category,
+        price: m.price || 0,
+        totalPortions: 0,
+        totalTrx: 0,
+        revenue: 0,
+      });
+    });
+
+    const prodTrxs = transactions.filter((t) => t.type === 'production');
+
+    prodTrxs.forEach((t) => {
+      const tYMD = getYYYYMMDD(t.transaction_date || t.created_at);
+      if (salesDateFilter === 'today' && tYMD !== todayYMD) return;
+      if (salesDateFilter === 'yesterday' && tYMD !== yesterdayYMD) return;
+      if (salesDateFilter === 'custom' && salesCustomDate && tYMD !== salesCustomDate) return;
+
+      const primaryMenuId = t.menu_id;
+      if (primaryMenuId && map.has(primaryMenuId)) {
+        const entry = map.get(primaryMenuId)!;
+        const portions = Number(t.portion_count) || 1;
+        entry.totalPortions += portions;
+        entry.totalTrx += 1;
+        entry.revenue += portions * entry.price;
+      }
+    });
+
+    return Array.from(map.entries()).map(([id, data]) => ({
+      id,
+      ...data,
+    })).filter((item) => {
+      if (salesSearchFilter.trim()) {
+        const q = salesSearchFilter.toLowerCase();
+        return item.menuName.toLowerCase().includes(q) || item.category.toLowerCase().includes(q);
+      }
+      return true;
+    }).sort((a, b) => b.totalPortions - a.totalPortions);
+  }, [menus, transactions, salesDateFilter, salesCustomDate, salesSearchFilter, todayYMD, yesterdayYMD]);
+
+  const totalPortionsAll = menuSalesData.reduce((sum, item) => sum + item.totalPortions, 0);
+  const totalRevenueAll = menuSalesData.reduce((sum, item) => sum + item.revenue, 0);
+  const topSellingItem = menuSalesData.length > 0 && menuSalesData[0].totalPortions > 0 ? menuSalesData[0] : null;
+
   return (
     <div className="space-y-6">
       {/* Subtab Switcher */}
-      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-stone-200 shadow-xs">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-stone-200 shadow-xs">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setReportTab('daily')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
@@ -74,6 +150,16 @@ export const ReportsView: React.FC = () => {
             }`}
           >
             <BookOpen className="w-4 h-4" /> Mutasi Stok (Stock Ledger)
+          </button>
+          <button
+            onClick={() => setReportTab('sales')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              reportTab === 'sales'
+                ? 'bg-amber-800 text-white shadow-sm'
+                : 'bg-stone-50 text-stone-700 hover:bg-stone-100 border border-stone-200'
+            }`}
+          >
+            <ShoppingBag className="w-4 h-4" /> Laporan Penjualan Menu
           </button>
         </div>
 
@@ -293,6 +379,176 @@ export const ReportsView: React.FC = () => {
                           {formatNumber(m.balance_after)} {selectedUnit.abbreviation}
                         </td>
                         <td className="p-3.5 font-sans text-stone-700">{m.description}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REPORT 3: MENU SALES REPORT */}
+      {reportTab === 'sales' && (
+        <div className="space-y-6">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs flex items-center gap-4">
+              <div className="p-3.5 bg-amber-100 text-amber-800 rounded-xl">
+                <Utensils className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs text-stone-500 font-medium">Total Porsi Terjual</span>
+                <div className="text-2xl font-extrabold text-stone-900 font-mono mt-0.5">
+                  {formatNumber(totalPortionsAll)} <span className="text-xs font-sans text-stone-500 font-semibold">Porsi</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs flex items-center gap-4">
+              <div className="p-3.5 bg-emerald-100 text-emerald-800 rounded-xl">
+                <TrendingUp className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs text-stone-500 font-medium">Estimasi Nilai Omset</span>
+                <div className="text-2xl font-extrabold text-emerald-900 font-mono mt-0.5">
+                  {formatCurrency(totalRevenueAll)}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs flex items-center gap-4">
+              <div className="p-3.5 bg-purple-100 text-purple-800 rounded-xl">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs text-stone-500 font-medium">Menu Terlaris (Top Selling)</span>
+                <div className="text-lg font-bold text-stone-900 font-serif mt-0.5 truncate max-w-48">
+                  {topSellingItem ? topSellingItem.menuName : '-'}
+                </div>
+                {topSellingItem && (
+                  <span className="text-xs text-purple-700 font-semibold">
+                    {formatNumber(topSellingItem.totalPortions)} porsi terjual
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Controls Bar */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-stone-200 shadow-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200">
+                <button
+                  onClick={() => setSalesDateFilter('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    salesDateFilter === 'all'
+                      ? 'bg-amber-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Semua
+                </button>
+                <button
+                  onClick={() => setSalesDateFilter('today')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    salesDateFilter === 'today'
+                      ? 'bg-amber-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Hari Ini
+                </button>
+                <button
+                  onClick={() => setSalesDateFilter('yesterday')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    salesDateFilter === 'yesterday'
+                      ? 'bg-amber-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Kemarin
+                </button>
+                <button
+                  onClick={() => setSalesDateFilter('custom')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    salesDateFilter === 'custom'
+                      ? 'bg-amber-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Pilih Tanggal
+                </button>
+              </div>
+
+              {salesDateFilter === 'custom' && (
+                <input
+                  type="date"
+                  value={salesCustomDate}
+                  onChange={(e) => setSalesCustomDate(e.target.value)}
+                  className="px-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-bold focus:outline-none"
+                />
+              )}
+            </div>
+
+            {/* Search Input */}
+            <div className="relative w-full md:w-64">
+              <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Cari nama menu..."
+                value={salesSearchFilter}
+                onChange={(e) => setSalesSearchFilter(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          </div>
+
+          {/* Sales Report Table */}
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-stone-50 text-stone-700 font-semibold border-b border-stone-200">
+                  <tr>
+                    <th className="p-3.5">Nama Menu Jualan</th>
+                    <th className="p-3.5">Kategori</th>
+                    <th className="p-3.5 text-right">Harga Per Porsi</th>
+                    <th className="p-3.5 text-right">Porsi Terjual</th>
+                    <th className="p-3.5 text-right">Jumlah Transaksi</th>
+                    <th className="p-3.5 text-right">Estimasi Total Omset</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {menuSalesData.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-stone-500 italic">
+                        Belum ada data penjualan menu pada periode ini.
+                      </td>
+                    </tr>
+                  ) : (
+                    menuSalesData.map((item) => (
+                      <tr key={item.id} className="hover:bg-stone-50 transition-colors">
+                        <td className="p-3.5 font-bold text-stone-900 font-serif text-sm">
+                          {item.menuName}
+                        </td>
+                        <td className="p-3.5">
+                          <span className="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                            {item.category}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right font-mono text-stone-700 font-semibold">
+                          {formatCurrency(item.price)}
+                        </td>
+                        <td className="p-3.5 text-right font-mono font-bold text-amber-900">
+                          {formatNumber(item.totalPortions)} porsi
+                        </td>
+                        <td className="p-3.5 text-right font-mono text-stone-600">
+                          {formatNumber(item.totalTrx)} kali
+                        </td>
+                        <td className="p-3.5 text-right font-mono font-extrabold text-emerald-900">
+                          {formatCurrency(item.revenue)}
+                        </td>
                       </tr>
                     ))
                   )}

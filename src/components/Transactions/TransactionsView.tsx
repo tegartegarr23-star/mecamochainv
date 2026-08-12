@@ -237,22 +237,53 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
   // 3. Production Form State
   const [prodDate, setProdDate] = useState(new Date().toISOString().slice(0, 10));
-  const [prodMenuId, setProdMenuId] = useState(menus[0]?.id || '');
-  const [prodPortions, setProdPortions] = useState(10);
   const [prodRefNo, setProdRefNo] = useState(generateRefNo('PROD'));
   const [prodNotes, setProdNotes] = useState('');
+  const [prodItems, setProdItems] = useState<Array<{ menu_id: string; portion_count: number }>>([
+    { menu_id: menus[0]?.id || '', portion_count: 5 },
+  ]);
   const [prodMessage, setProdMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Live calculation of stock sufficiency for production
-  const productionSufficiency = checkProductionSufficiency(prodMenuId, prodPortions);
+  // Live calculation of stock sufficiency for production (multi-item)
+  const productionSufficiency = React.useMemo(() => {
+    const reqMap = new Map<string, { ingredient: any; requiredQty: number; currentStock: number; unit: any }>();
+    for (const item of prodItems) {
+      if (!item.menu_id || item.portion_count <= 0) continue;
+      const suff = checkProductionSufficiency(item.menu_id, item.portion_count);
+      for (const sItem of suff.items) {
+        if (!sItem.ingredient) continue;
+        const ingId = sItem.ingredient.id;
+        const existing = reqMap.get(ingId);
+        if (existing) {
+          existing.requiredQty += sItem.requiredQty;
+        } else {
+          reqMap.set(ingId, {
+            ingredient: sItem.ingredient,
+            requiredQty: sItem.requiredQty,
+            currentStock: sItem.currentStock,
+            unit: sItem.unit,
+          });
+        }
+      }
+    }
+
+    const items = Array.from(reqMap.values()).map((val) => {
+      const isShortage = val.currentStock < val.requiredQty;
+      const missingQty = isShortage ? val.requiredQty - val.currentStock : 0;
+      return { ...val, isShortage, missingQty };
+    });
+
+    const isSufficient = items.every((i) => !i.isShortage);
+    return { items, isSufficient };
+  }, [prodItems, menus, ingredients, stockMovements, checkProductionSufficiency]);
 
   // 4. Adjustment Form State
   const [adjDate, setAdjDate] = useState(new Date().toISOString().slice(0, 10));
-  const [adjIngredientId, setAdjIngredientId] = useState('');
-  const [adjQty, setAdjQty] = useState<number | ''>('');
-  const [adjMode, setAdjMode] = useState<'plus' | 'minus' | 'set'>('minus');
-  const [adjReason, setAdjReason] = useState<'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other'>('Damage');
+  const [adjReason, setAdjReason] = useState<'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other'>('Stock Opname');
   const [adjNotes, setAdjNotes] = useState('');
+  const [adjItems, setAdjItems] = useState<Array<{ ingredient_id: string; quantity: number | ''; mode: 'plus' | 'minus' | 'set'; item_notes?: string }>>([
+    { ingredient_id: ingredients[0]?.id || '', quantity: '', mode: 'set', item_notes: '' },
+  ]);
 
   useEffect(() => {
     if (ingredients.length > 0) {
@@ -354,12 +385,19 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   // Submit Production
   const handleProductionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const res = addProductionTransaction(prodDate, prodMenuId, prodPortions, prodRefNo, prodNotes);
+    const validItems = prodItems.filter((i) => i.menu_id && Number(i.portion_count) > 0);
+    if (validItems.length === 0) {
+      setProdMessage({ type: 'error', text: 'Pilih minimal 1 menu dengan porsi lebih dari 0' });
+      return;
+    }
+
+    const res = addProductionTransaction(prodDate, validItems, prodRefNo, prodNotes);
 
     if (res.success) {
       setProdMessage({ type: 'success', text: res.message });
       setProdRefNo(generateRefNo('PROD'));
       setProdNotes('');
+      setProdItems([{ menu_id: menus[0]?.id || '', portion_count: 5 }]);
       setTimeout(() => {
         setProdMessage(null);
         setActiveTab('history');
@@ -372,21 +410,24 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   // Submit Adjustment
   const handleAdjustmentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const targetIngId = adjIngredientId || ingredients[0]?.id || '';
-    const numQty = Number(adjQty);
-    if (!targetIngId) {
-      alert('Pilih bahan baku terlebih dahulu.');
-      return;
-    }
-    if (adjQty === '' || isNaN(numQty) || numQty < 0) {
-      alert('Masukkan kuantitas penyesuaian yang valid.');
+    const sanitizedItems = adjItems
+      .filter((i) => i.ingredient_id && i.quantity !== '' && !isNaN(Number(i.quantity)) && Number(i.quantity) >= 0)
+      .map((i) => ({
+        ingredient_id: i.ingredient_id,
+        quantity: Number(i.quantity),
+        mode: i.mode,
+        item_notes: i.item_notes,
+      }));
+
+    if (sanitizedItems.length === 0) {
+      alert('Mohon masukkan minimal 1 bahan baku dengan kuantitas penyesuaian yang valid.');
       return;
     }
 
-    addAdjustmentTransaction(adjDate, targetIngId, numQty, adjMode, adjReason, adjNotes);
-    alert('Penyesuaian stok berhasil disimpan!');
-    setAdjQty('');
+    addAdjustmentTransaction(adjDate, sanitizedItems, adjReason, adjNotes);
+    alert(`Berhasil menyimpan penyesuaian stok untuk ${sanitizedItems.length} bahan!`);
     setAdjNotes('');
+    setAdjItems([{ ingredient_id: ingredients[0]?.id || '', quantity: '', mode: adjReason === 'Stock Opname' ? 'set' : 'minus', item_notes: '' }]);
     setActiveTab('history');
   };
 
@@ -481,7 +522,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
         </button>
       </div>
 
-      {/* FORM 1: PRODUKSI MENU (PRODUCTION) */}
+      {/* FORM 1: PRODUKSI MENU / PENJUALAN (PRODUCTION) */}
       {activeTab === 'production' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left: Input Form (1 col) */}
@@ -491,8 +532,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                 <Plus className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-stone-900 text-base font-serif">Pencatatan Produksi Menu</h3>
-                <p className="text-xs text-stone-500">Stok bahan baku terpotong otomatis berdasarkan resep</p>
+                <h3 className="font-bold text-stone-900 text-base font-serif">Pencatatan Penjualan / Produksi Menu</h3>
+                <p className="text-xs text-stone-500">Input beberapa menu sekaligus. Stok bahan terpotong otomatis!</p>
               </div>
             </div>
 
@@ -514,51 +555,102 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
             )}
 
             <form onSubmit={handleProductionSubmit} className="space-y-4">
-              {renderQuickDatePicker('Tanggal Produksi', prodDate, setProdDate)}
+              <div className="grid grid-cols-1 gap-3">
+                {renderQuickDatePicker('Tanggal Penjualan', prodDate, setProdDate)}
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">No. Referensi / Ref</label>
+                  <input
+                    type="text"
+                    required
+                    value={prodRefNo}
+                    onChange={(e) => setProdRefNo(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
+                  />
+                </div>
+              </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Menu / Produk</label>
-                <select
-                  value={prodMenuId}
-                  onChange={(e) => setProdMenuId(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-                >
-                  {menus.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} ({m.category})
-                    </option>
+              {/* Multi Menu List Inputs */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-stone-900">Daftar Menu Terjual / Diproduksi</label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setProdItems([
+                        ...prodItems,
+                        { menu_id: menus[0]?.id || '', portion_count: 1 },
+                      ])
+                    }
+                    className="text-xs font-bold text-amber-800 hover:underline flex items-center gap-1 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> + Tambah Menu
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {prodItems.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1">
+                          <label className="block text-[10px] font-semibold text-stone-500 mb-1">Pilih Menu</label>
+                          <select
+                            value={item.menu_id}
+                            onChange={(e) => {
+                              const next = [...prodItems];
+                              next[idx].menu_id = e.target.value;
+                              setProdItems(next);
+                            }}
+                            className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg bg-white border border-stone-300 focus:outline-none"
+                          >
+                            {menus.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name} ({m.category})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="w-24">
+                          <label className="block text-[10px] font-semibold text-stone-500 mb-1">Porsi</label>
+                          <input
+                            type="number"
+                            min="1"
+                            required
+                            value={item.portion_count}
+                            onChange={(e) => {
+                              const next = [...prodItems];
+                              next[idx].portion_count = Math.max(1, parseInt(e.target.value) || 1);
+                              setProdItems(next);
+                            }}
+                            className="w-full px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg bg-white border border-stone-300 focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="pt-4">
+                          <button
+                            type="button"
+                            onClick={() => setProdItems(prodItems.filter((_, i) => i !== idx))}
+                            disabled={prodItems.length <= 1}
+                            className="p-1.5 text-stone-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-30"
+                            title="Hapus menu"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Jumlah Porsi Diproduksi</label>
-                <input
-                  type="number"
-                  min="1"
-                  required
-                  value={prodPortions}
-                  onChange={(e) => setProdPortions(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">No. Referensi / Batch</label>
-                <input
-                  type="text"
-                  required
-                  value={prodRefNo}
-                  onChange={(e) => setProdRefNo(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-                />
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-stone-700 mb-1">Catatan</label>
                 <input
                   type="text"
-                  placeholder="Contoh: Batch Pagi 10 Porsi"
+                  placeholder="Contoh: Penjualan shift siang"
                   value={prodNotes}
                   onChange={(e) => setProdNotes(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
@@ -591,10 +683,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
               <div>
                 <h3 className="font-bold text-stone-900 text-base font-serif flex items-center gap-2">
                   <Sparkles className="w-5 h-5 text-amber-700" />
-                  Estimasi Kecukupan Stok Bahan
+                  Estimasi Kecukupan Stok Bahan Total
                 </h3>
                 <p className="text-xs text-stone-500">
-                  Perhitungan takaran resep x {prodPortions} porsi terhadap stok gudang saat ini
+                  Perhitungan total kebutuhan bahan dari {prodItems.reduce((acc, i) => acc + (i.portion_count || 0), 0)} porsi menu
                 </p>
               </div>
 
@@ -614,7 +706,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                 <thead className="bg-stone-50 text-stone-600 font-semibold border-b border-stone-200">
                   <tr>
                     <th className="p-3">Nama Bahan Baku</th>
-                    <th className="p-3 text-right">Dibutuhkan ({prodPortions} porsi)</th>
+                    <th className="p-3 text-right">Dibutuhkan</th>
                     <th className="p-3 text-right">Stok Saat Ini</th>
                     <th className="p-3 text-center">Status Kecukupan</th>
                   </tr>
@@ -1076,14 +1168,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
       {/* FORM 4: ADJUSTMENT */}
       {activeTab === 'adjustment' && (
-        <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-xs max-w-xl mx-auto space-y-4">
+        <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-xs max-w-2xl mx-auto space-y-4">
           <div className="flex items-center gap-2.5 pb-3 border-b border-stone-100">
             <div className="p-2.5 rounded-xl bg-purple-100 text-purple-800">
               <SlidersHorizontal className="w-5 h-5" />
             </div>
             <div>
               <h3 className="font-bold text-stone-900 text-base font-serif">Penyesuaian Stok Manual</h3>
-              <p className="text-xs text-stone-500">Penyesuaian akibat kerusakan, expired, opname, atau loss</p>
+              <p className="text-xs text-stone-500">Penyesuaian beberapa bahan baku sekaligus akibat kerusakan, expired, opname, atau loss</p>
             </div>
           </div>
 
@@ -1091,110 +1183,167 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
             <div className="grid grid-cols-2 gap-3">
               {renderQuickDatePicker('Tanggal Penyesuaian', adjDate, setAdjDate)}
               <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Tipe Penyesuaian</label>
-                <select
-                  value={adjMode}
-                  onChange={(e) => setAdjMode(e.target.value as 'plus' | 'minus' | 'set')}
-                  className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-                >
-                  <option value="set">Set Stok Fisik (Opname Langsung)</option>
-                  <option value="minus">Keluar (-) Penurunan Stok</option>
-                  <option value="plus">Masuk (+) Penambahan Stok</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Bahan Baku</label>
-              <SearchableIngredientSelect
-                ingredients={ingredients}
-                value={adjIngredientId}
-                onChange={(newId) => setAdjIngredientId(newId)}
-                className="w-full"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">
-                  {adjMode === 'set' ? 'Jumlah Stok Fisik Hasil Opname' : 'Kuantitas Penyesuaian'}
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  required
-                  value={adjQty}
-                  onChange={(e) => setAdjQty(e.target.value === '' ? '' : Number(e.target.value))}
-                  placeholder={adjMode === 'set' ? "Total stok fisik hasil opname" : "Kuantitas"}
-                  className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Alasan Penyesuaian</label>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">Alasan Penyesuaian Utama</label>
                 <select
                   value={adjReason}
                   onChange={(e) => {
                     const r = e.target.value as 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other';
                     setAdjReason(r);
-                    if (r === 'Stock Opname') {
-                      setAdjMode('set');
-                    } else if (r === 'Damage' || r === 'Expired' || r === 'Loss') {
-                      setAdjMode('minus');
-                    }
+                    const defaultMode = r === 'Stock Opname' ? 'set' : r === 'Other' ? 'minus' : 'minus';
+                    setAdjItems((prev) => prev.map((item) => ({ ...item, mode: defaultMode })));
                   }}
                   className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                 >
-                  <option value="Damage">Damage (Kerusakan)</option>
-                  <option value="Expired">Expired (Kadaluwarsa)</option>
-                  <option value="Loss">Loss (Kehilangan)</option>
-                  <option value="Stock Opname">Stock Opname (Hasil Cek Fisik)</option>
+                  <option value="Stock Opname">Stock Opname (Hasil Cek Fisik / Set Langsung)</option>
+                  <option value="Damage">Damage (Kerusakan / Keluar -)</option>
+                  <option value="Expired">Expired (Kadaluwarsa / Keluar -)</option>
+                  <option value="Loss">Loss (Kehilangan / Keluar -)</option>
                   <option value="Other">Lainnya</option>
                 </select>
               </div>
             </div>
 
-            {/* Live Preview Calculation */}
-            {(() => {
-              const currentIng = ingredients.find((i) => i.id === adjIngredientId) || ingredients[0];
-              if (!currentIng) return null;
-
-              const numQty = Number(adjQty) || 0;
-              const currentStock = Number(currentIng.current_stock) || 0;
-
-              const targetStock =
-                adjMode === 'set'
-                  ? numQty
-                  : adjMode === 'plus'
-                  ? currentStock + numQty
-                  : currentStock - numQty;
-
-              const diff = targetStock - currentStock;
-
-              return (
-                <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-900 font-medium">
-                  <div className="font-bold flex justify-between">
-                    <span>Pratinjau Hasil Adjustment:</span>
-                    <span>{currentIng.name}</span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between text-stone-700">
-                    <span>
-                      Stok Lama: <strong>{formatNumber(currentIng.current_stock)}</strong>
-                    </span>
-                    <span>➔</span>
-                    <span>
-                      Stok Baru:{' '}
-                      <strong className="text-purple-800 font-extrabold text-sm font-mono">
-                        {formatNumber(targetStock)}
-                      </strong>
-                    </span>
-                  </div>
-                  <div className="mt-1 text-[11px] text-purple-700">
-                    Perubahan Mutasi: {diff >= 0 ? '+' : ''}
-                    {formatNumber(diff)}
-                  </div>
+            {/* Multi Item Adjustment List */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-stone-900">Daftar Bahan Baku Yang Disesuaikan</h4>
+                  <p className="text-[11px] text-stone-500">Pilih bahan baku, mode penyesuaian, dan kuantitas baru</p>
                 </div>
-              );
-            })()}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstIng = ingredients[0];
+                    setAdjItems([
+                      ...adjItems,
+                      {
+                        ingredient_id: firstIng?.id || '',
+                        quantity: '',
+                        mode: adjReason === 'Stock Opname' ? 'set' : 'minus',
+                        item_notes: '',
+                      },
+                    ]);
+                  }}
+                  className="text-xs font-bold text-purple-800 hover:underline flex items-center gap-1 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-200"
+                >
+                  <Plus className="w-3.5 h-3.5" /> + Tambah Bahan
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {adjItems.map((item, idx) => {
+                  const currentIng = ingredients.find((i) => i.id === item.ingredient_id || i.code === item.ingredient_id);
+                  const unit = units.find((u) => u.id === currentIng?.unit_id);
+                  const currentStock = currentIng ? Number(currentIng.current_stock) || 0 : 0;
+                  const numQty = item.quantity === '' ? 0 : Number(item.quantity) || 0;
+
+                  const targetStock =
+                    item.mode === 'set'
+                      ? numQty
+                      : item.mode === 'plus'
+                      ? currentStock + numQty
+                      : currentStock - numQty;
+
+                  const diff = targetStock - currentStock;
+
+                  return (
+                    <div
+                      key={idx}
+                      className="p-3.5 rounded-xl bg-stone-50 border border-stone-200 space-y-2"
+                    >
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
+                        {/* Ingredient Select */}
+                        <div className="md:col-span-5">
+                          <label className="block text-[10px] font-semibold text-stone-500 mb-1">
+                            Pilih Bahan Baku
+                          </label>
+                          <SearchableIngredientSelect
+                            ingredients={ingredients}
+                            value={item.ingredient_id}
+                            onChange={(newId) => {
+                              const next = [...adjItems];
+                              next[idx].ingredient_id = newId;
+                              setAdjItems(next);
+                            }}
+                            className="w-full"
+                          />
+                        </div>
+
+                        {/* Mode Select */}
+                        <div className="md:col-span-3">
+                          <label className="block text-[10px] font-semibold text-stone-500 mb-1">
+                            Mode
+                          </label>
+                          <select
+                            value={item.mode}
+                            onChange={(e) => {
+                              const next = [...adjItems];
+                              next[idx].mode = e.target.value as 'plus' | 'minus' | 'set';
+                              setAdjItems(next);
+                            }}
+                            className="w-full px-2 py-1.5 text-xs font-bold rounded-lg bg-white border border-stone-300 focus:outline-none"
+                          >
+                            <option value="set">Set Stok Fisik</option>
+                            <option value="minus">Keluar (-)</option>
+                            <option value="plus">Masuk (+)</option>
+                          </select>
+                        </div>
+
+                        {/* Quantity Input */}
+                        <div className="md:col-span-3">
+                          <label className="block text-[10px] font-semibold text-stone-500 mb-1">
+                            {item.mode === 'set' ? 'Jumlah Opname' : 'Kuantitas'} ({unit?.abbreviation || 'Unit'})
+                          </label>
+                          <input
+                            type="number"
+                            step="any"
+                            required
+                            placeholder={item.mode === 'set' ? 'Stok Fisik' : 'Qty'}
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const next = [...adjItems];
+                              next[idx].quantity = e.target.value === '' ? '' : Number(e.target.value);
+                              setAdjItems(next);
+                            }}
+                            className="w-full px-2 py-1.5 text-xs font-mono font-bold rounded-lg bg-white border border-stone-300 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Remove Row */}
+                        <div className="md:col-span-1 text-center pt-3 md:pt-0">
+                          <button
+                            type="button"
+                            onClick={() => setAdjItems(adjItems.filter((_, i) => i !== idx))}
+                            disabled={adjItems.length <= 1}
+                            className="p-1.5 text-stone-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-30"
+                            title="Hapus baris"
+                          >
+                            <Trash2 className="w-4 h-4 mx-auto" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Preview for item */}
+                      {currentIng && item.quantity !== '' && (
+                        <div className="flex items-center justify-between text-[11px] bg-purple-50/70 p-2 rounded-lg border border-purple-100 text-purple-900 font-medium">
+                          <span>
+                            Stok Saat Ini: <strong>{formatNumber(currentStock)}</strong> {unit?.abbreviation}
+                          </span>
+                          <span>➔</span>
+                          <span>
+                            Stok Baru:{' '}
+                            <strong className="text-purple-800 font-bold font-mono">
+                              {formatNumber(targetStock)}
+                            </strong>{' '}
+                            {unit?.abbreviation} (Selisih: {diff >= 0 ? '+' : ''}{formatNumber(diff)})
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
 
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">Keterangan / Notes</label>
@@ -1211,7 +1360,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
               type="submit"
               className="w-full py-2.5 rounded-xl bg-purple-800 hover:bg-purple-900 text-white font-bold text-xs shadow-md"
             >
-              Simpan Penyesuaian Stok
+              Simpan Penyesuaian Stok ({adjItems.length} Bahan)
             </button>
           </form>
         </div>

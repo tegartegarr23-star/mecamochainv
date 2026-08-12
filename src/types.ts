@@ -114,6 +114,20 @@ export interface PrepareItemInput {
   is_target: boolean; // false = source (out), true = target (in)
 }
 
+// Helper structure for Production / Penjualan items
+export interface ProductionItemInput {
+  menu_id: string;
+  portion_count: number;
+}
+
+// Helper structure for Adjustment items
+export interface AdjustmentItemInput {
+  ingredient_id: string;
+  quantity: number;
+  mode: 'plus' | 'minus' | 'set';
+  item_notes?: string;
+}
+
 // Daily Stock Report Row
 export interface DailyStockRow {
   ingredient: Ingredient;

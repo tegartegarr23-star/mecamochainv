@@ -13,6 +13,8 @@ import {
   StockMovement,
   PurchaseItemInput,
   PrepareItemInput,
+  ProductionItemInput,
+  AdjustmentItemInput,
   DailyStockRow,
 } from '../types';
 import {
@@ -76,7 +78,7 @@ interface InventoryContextType {
   menus: Menu[];
   addMenu: (menu: Omit<Menu, 'id'>) => void;
   updateMenu: (id: string, menu: Partial<Menu>) => void;
-  deleteMenu: (id: string) => void;
+  deleteMenu: (id: string) => Promise<void>;
 
   // Recipes
   recipes: Recipe[];
@@ -95,9 +97,22 @@ interface InventoryContextType {
   addPrepareTransaction: (date: string, refNo: string, notes: string, items: PrepareItemInput[]) => void;
   
   checkProductionSufficiency: (menuId: string, portionCount: number) => ProductionSufficiencyResult;
-  addProductionTransaction: (date: string, menuId: string, portionCount: number, refNo: string, notes: string) => { success: boolean; message: string };
+  addProductionTransaction: (
+    date: string,
+    menuIdOrItems: string | ProductionItemInput[],
+    portionCountOrRefNo?: number | string,
+    refNoOrNotes?: string,
+    notesOrEmpty?: string
+  ) => { success: boolean; message: string };
   
-  addAdjustmentTransaction: (date: string, ingredientId: string, quantity: number, mode: 'plus' | 'minus' | 'set', reason: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other', notes: string) => void;
+  addAdjustmentTransaction: (
+    date: string,
+    ingredientIdOrItems: string | AdjustmentItemInput[],
+    quantityOrReason?: number | 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other',
+    modeOrNotes?: 'plus' | 'minus' | 'set' | string,
+    reasonOrEmpty?: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other',
+    notesOrEmpty?: string
+  ) => void;
   deleteTransaction: (transactionId: string) => Promise<void>;
   clearAllTransactions: () => Promise<void>;
 
@@ -130,6 +145,7 @@ const STORAGE_KEYS = {
   TRANSACTIONS: 'mecamocha_transactions_v3',
   STOCK_MOVEMENTS: 'mecamocha_stock_movements_v3',
   DELETED_ING_IDS: 'mecamocha_deleted_ing_ids_v3',
+  DELETED_MENU_IDS: 'mecamocha_deleted_menu_ids_v3',
 };
 
 const InventoryContext = createContext<InventoryContextType | undefined>(undefined);
@@ -137,6 +153,17 @@ const InventoryContext = createContext<InventoryContextType | undefined>(undefin
 const getSavedDeletedIngIds = (): Set<string> => {
   try {
     const saved = localStorage.getItem('mecamocha_deleted_ing_ids_v3');
+    if (saved) {
+      const arr = JSON.parse(saved);
+      if (Array.isArray(arr)) return new Set(arr);
+    }
+  } catch {}
+  return new Set();
+};
+
+const getSavedDeletedMenuIds = (): Set<string> => {
+  try {
+    const saved = localStorage.getItem('mecamocha_deleted_menu_ids_v3');
     if (saved) {
       const arr = JSON.parse(saved);
       if (Array.isArray(arr)) return new Set(arr);
@@ -199,13 +226,22 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       );
     });
   });
-  const [menus, setMenus] = useState<Menu[]>(() => loadFromStorage(STORAGE_KEYS.MENUS, INITIAL_MENUS));
+  const [menus, setMenus] = useState<Menu[]>(() => {
+    const loaded = loadFromStorage(STORAGE_KEYS.MENUS, INITIAL_MENUS);
+    const deletedIds = getSavedDeletedMenuIds();
+    if (!deletedIds || deletedIds.size === 0) return loaded;
+    return loaded.filter((m) => {
+      const idStr = String(m.id).trim().toLowerCase();
+      return !deletedIds.has(idStr) && !deletedIds.has(String(m.id).trim());
+    });
+  });
   const [recipes, setRecipes] = useState<Recipe[]>(() => loadFromStorage(STORAGE_KEYS.RECIPES, INITIAL_RECIPES));
   const [recipeDetails, setRecipeDetails] = useState<RecipeDetail[]>(() => sanitizeRecipeDetails(loadFromStorage(STORAGE_KEYS.RECIPE_DETAILS, INITIAL_RECIPE_DETAILS)));
   const [transactions, setTransactions] = useState<Transaction[]>(() => loadFromStorage(STORAGE_KEYS.TRANSACTIONS, INITIAL_TRANSACTIONS));
   const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => loadFromStorage(STORAGE_KEYS.STOCK_MOVEMENTS, INITIAL_STOCK_MOVEMENTS));
   const deletedTrxIdsRef = useRef<Set<string>>(new Set());
   const deletedIngIdsRef = useRef<Set<string>>(getSavedDeletedIngIds());
+  const deletedMenuIdsRef = useRef<Set<string>>(getSavedDeletedMenuIds());
 
   // Helper to merge local state and remote Supabase state without wiping un-synced items
   const mergeByField = <T,>(localList: T[], remoteList: T[], key: keyof T): T[] => {
@@ -399,7 +435,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (sbUnits && sbUnits.length > 0) setUnits((prev) => mergeByField(prev, sbUnits, 'id'));
       if (sbCategories && sbCategories.length > 0) setCategories((prev) => mergeByField(prev, sbCategories, 'id'));
       if (sbSuppliers && sbSuppliers.length > 0) setSuppliers((prev) => mergeByField(prev, sbSuppliers, 'id'));
-      if (sbMenus && sbMenus.length > 0) setMenus((prev) => mergeByField(prev, sbMenus, 'id'));
+      if (sbMenus && sbMenus.length > 0) {
+        const isMenuDeleted = (m: Menu) => {
+          const idStr = String(m.id).trim().toLowerCase();
+          return deletedMenuIdsRef.current.has(idStr) || deletedMenuIdsRef.current.has(String(m.id).trim());
+        };
+        setMenus((prev) => {
+          const localActive = prev.filter((m) => !isMenuDeleted(m));
+          const remoteActive = sbMenus.filter((m) => !isMenuDeleted(m));
+          const merged = mergeByField(localActive, remoteActive, 'id');
+          saveToStorage(STORAGE_KEYS.MENUS, merged);
+          return merged;
+        });
+      }
       if (sbRecipes && sbRecipes.length > 0) setRecipes((prev) => mergeByField(prev, sbRecipes, 'id'));
       if (recipeDetailsData && recipeDetailsData.length > 0) {
         setRecipeDetails((prev) => {
@@ -1273,25 +1321,53 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteMenu = async (id: string) => {
-    const relatedRecipes = recipes.filter((r) => r.menu_id === id);
-    const relatedRecipeIds = relatedRecipes.map((r) => r.id);
+    const cleanId = String(id).trim();
+    const targetMenu = menus.find(
+      (m) => String(m.id).trim().toLowerCase() === cleanId.toLowerCase()
+    );
+    const menuId = targetMenu ? String(targetMenu.id).trim() : cleanId;
 
-    setMenus((prev) => prev.filter((m) => m.id !== id));
-    setRecipes((prev) => prev.filter((r) => r.menu_id !== id));
-    setRecipeDetails((prev) => prev.filter((rd) => !relatedRecipeIds.includes(rd.recipe_id)));
+    deletedMenuIdsRef.current.add(menuId);
+    deletedMenuIdsRef.current.add(menuId.toLowerCase());
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.DELETED_MENU_IDS,
+        JSON.stringify(Array.from(deletedMenuIdsRef.current))
+      );
+    } catch {}
+
+    const relatedRecipes = recipes.filter(
+      (r) => String(r.menu_id).trim().toLowerCase() === menuId.toLowerCase()
+    );
+    const relatedRecipeIds = relatedRecipes.map((r) => String(r.id));
+
+    const nextMenus = menus.filter(
+      (m) => String(m.id).trim().toLowerCase() !== menuId.toLowerCase()
+    );
+    const nextRecipes = recipes.filter(
+      (r) => String(r.menu_id).trim().toLowerCase() !== menuId.toLowerCase()
+    );
+    const nextRecipeDetails = recipeDetails.filter(
+      (rd) => !relatedRecipeIds.includes(String(rd.recipe_id))
+    );
+
+    setMenus(nextMenus);
+    setRecipes(nextRecipes);
+    setRecipeDetails(nextRecipeDetails);
+
+    saveToStorage(STORAGE_KEYS.MENUS, nextMenus);
+    saveToStorage(STORAGE_KEYS.RECIPES, nextRecipes);
+    saveToStorage(STORAGE_KEYS.RECIPE_DETAILS, nextRecipeDetails);
 
     try {
       const supabase = getSupabase();
       if (supabase) {
-        // Delete recipe details first, then recipes, then menu
         for (const recId of relatedRecipeIds) {
-          const { error: rdErr } = await supabase.from('recipe_details').delete().eq('recipe_id', recId);
-          if (rdErr && rdErr.message?.includes('does not exist')) {
-            await supabase.from('recipe_items').delete().eq('recipe_id', recId);
-          }
+          try { await supabase.from('recipe_details').delete().eq('recipe_id', recId); } catch {}
+          try { await supabase.from('recipe_items').delete().eq('recipe_id', recId); } catch {}
         }
-        await supabase.from('recipes').delete().eq('menu_id', id);
-        await supabase.from('menus').delete().eq('id', id);
+        try { await supabase.from('recipes').delete().eq('menu_id', menuId); } catch {}
+        try { await supabase.from('menus').delete().eq('id', menuId); } catch {}
       }
     } catch (e) {
       console.warn('Error deleting menu from Supabase:', e);
@@ -1785,31 +1861,73 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const addProductionTransaction = (
     date: string,
-    menuId: string,
-    portionCount: number,
-    refNo: string,
-    notes: string
+    menuIdOrItems: string | ProductionItemInput[],
+    portionCountOrRefNo?: number | string,
+    refNoOrNotes?: string,
+    notesOrEmpty?: string
   ) => {
-    const menu = menus.find((m) => m.id === menuId);
-    if (!menu) return { success: false, message: 'Menu tidak ditemukan' };
+    let items: ProductionItemInput[] = [];
+    let refNo = '';
+    let notes = '';
 
-    const sufficiency = checkProductionSufficiency(menuId, portionCount);
-    if (sufficiency.items.length === 0) {
-      return { success: false, message: 'Resep untuk menu ini belum dikonfigurasi' };
+    if (Array.isArray(menuIdOrItems)) {
+      items = menuIdOrItems.filter((i) => i.menu_id && Number(i.portion_count) > 0);
+      refNo = (portionCountOrRefNo as string) || '';
+      notes = refNoOrNotes || '';
+    } else {
+      items = [{ menu_id: menuIdOrItems, portion_count: Number(portionCountOrRefNo) || 1 }];
+      refNo = (refNoOrNotes as string) || '';
+      notes = notesOrEmpty || '';
+    }
+
+    if (items.length === 0) {
+      return { success: false, message: 'Pilih minimal 1 menu dengan porsi lebih dari 0' };
+    }
+
+    const allRequiredMovements: Array<{ ingredient_id: string; requiredQty: number; menuName: string; portionCount: number }> = [];
+
+    for (const item of items) {
+      const menu = menus.find((m) => m.id === item.menu_id || m.name === item.menu_id);
+      if (!menu) continue;
+
+      const sufficiency = checkProductionSufficiency(item.menu_id, item.portion_count);
+      if (sufficiency.items.length === 0) {
+        return { success: false, message: `Resep untuk menu "${menu.name}" belum dikonfigurasi` };
+      }
+
+      for (const sItem of sufficiency.items) {
+        const ingId = String(sItem.ingredient?.id || '').trim();
+        if (ingId) {
+          allRequiredMovements.push({
+            ingredient_id: ingId,
+            requiredQty: sItem.requiredQty,
+            menuName: menu.name,
+            portionCount: item.portion_count,
+          });
+        }
+      }
+    }
+
+    if (allRequiredMovements.length === 0) {
+      return { success: false, message: 'Tidak ada komposisi resep yang dapat diproses' };
     }
 
     const now = Date.now();
     const trxId = `trx-prod-${now}`;
     const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
     const actualRefNo = refNo || generateRefNo('PROD');
+
+    const primaryMenuId = items[0]?.menu_id || '';
+    const totalPortions = items.reduce((sum, i) => sum + i.portion_count, 0);
+
     const newTrx: Transaction = {
       id: trxId,
       type: 'production',
       transaction_date: isoDate,
       reference_no: actualRefNo,
-      menu_id: menuId,
-      portion_count: portionCount,
-      notes,
+      menu_id: primaryMenuId,
+      portion_count: totalPortions,
+      notes: notes || `Penjualan ${items.length} menu items (${totalPortions} porsi)`,
       created_by: currentUser.name,
       created_at: new Date(now).toISOString(),
     };
@@ -1817,18 +1935,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const newMovements: StockMovement[] = [];
     const updatedIngredients = [...ingredients];
 
-    sufficiency.items.forEach((item, index) => {
-      const targetId = String(item.ingredient?.id || '').trim().toLowerCase();
+    allRequiredMovements.forEach((req, index) => {
+      const targetId = req.ingredient_id.toLowerCase();
       const ingIndex = updatedIngredients.findIndex(
         (i) =>
           String(i.id).trim().toLowerCase() === targetId ||
-          String(i.code).trim().toLowerCase() === targetId
+          String(i.code || '').trim().toLowerCase() === targetId
       );
+
       if (ingIndex !== -1) {
         const currentIng = updatedIngredients[ingIndex];
         const realIngId = String(currentIng.id);
         const currentStock = getIngredientCurrentStock(currentIng, [...newMovements, ...stockMovements]);
-        const newStock = currentStock - item.requiredQty;
+        const newStock = currentStock - req.requiredQty;
         updatedIngredients[ingIndex] = { ...currentIng, current_stock: newStock };
 
         newMovements.push({
@@ -1836,9 +1955,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           transaction_id: trxId,
           ingredient_id: realIngId,
           type: 'out',
-          quantity: item.requiredQty,
+          quantity: req.requiredQty,
           balance_after: newStock,
-          description: `Produksi / Penjualan ${portionCount} porsi ${menu.name} (${actualRefNo})`,
+          description: `Penjualan ${req.portionCount} porsi ${req.menuName} (${actualRefNo})`,
           created_at: new Date(now + index * 10).toISOString(),
         });
       }
@@ -1862,7 +1981,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     return {
       success: true,
-      message: `Berhasil mencatat produksi/penjualan ${portionCount} porsi ${menu.name}. Stok bahan telah terpotong otomatis.`,
+      message: `Berhasil mencatat penjualan/produksi ${items.length} menu (${totalPortions} porsi). Stok bahan telah terpotong otomatis!`,
     };
   };
 
@@ -1895,44 +2014,34 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const addAdjustmentTransaction = (
     date: string,
-    ingredientId: string,
-    quantity: number,
-    mode: 'plus' | 'minus' | 'set',
-    reason: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other',
-    notes: string
+    ingredientIdOrItems: string | AdjustmentItemInput[],
+    quantityOrReason?: number | 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other',
+    modeOrNotes?: 'plus' | 'minus' | 'set' | string,
+    reasonOrEmpty?: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other',
+    notesOrEmpty?: string
   ) => {
-    const ing = ingredients.find(
-      (i) => i.id === ingredientId || i.code === ingredientId
-    ) || ingredients[0];
-    if (!ing) return;
+    let items: AdjustmentItemInput[] = [];
+    let reason: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other' = 'Stock Opname';
+    let notes = '';
+
+    if (Array.isArray(ingredientIdOrItems)) {
+      items = ingredientIdOrItems.filter((i) => i.ingredient_id && !isNaN(Number(i.quantity)) && Number(i.quantity) >= 0);
+      reason = (quantityOrReason as any) || 'Stock Opname';
+      notes = (modeOrNotes as string) || '';
+    } else {
+      const ingId = ingredientIdOrItems;
+      const qty = Number(quantityOrReason) || 0;
+      const mode = (modeOrNotes as 'plus' | 'minus' | 'set') || 'set';
+      reason = reasonOrEmpty || 'Stock Opname';
+      notes = notesOrEmpty || '';
+      items = [{ ingredient_id: ingId, quantity: qty, mode }];
+    }
+
+    if (items.length === 0) return;
 
     const now = Date.now();
     const trxId = `trx-adj-${now}`;
     const refNo = generateRefNo('ADJ');
-    const qty = Math.max(0, Number(quantity) || 0);
-
-    const currentStock = getIngredientCurrentStock(ing, stockMovements);
-
-    let newStock = currentStock;
-    let moveQty = qty;
-    let moveType: 'in' | 'out' = 'out';
-
-    if (mode === 'set') {
-      newStock = qty;
-      const diff = newStock - currentStock;
-      moveType = diff >= 0 ? 'in' : 'out';
-      moveQty = Math.abs(diff);
-    } else if (mode === 'plus') {
-      newStock = currentStock + qty;
-      moveType = 'in';
-      moveQty = qty;
-    } else {
-      newStock = currentStock - qty;
-      moveType = 'out';
-      moveQty = qty;
-    }
-
-    const updatedIng: Ingredient = { ...ing, current_stock: newStock };
 
     const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
     const newTrx: Transaction = {
@@ -1940,40 +2049,77 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       type: 'adjustment',
       transaction_date: isoDate,
       reference_no: refNo,
-      notes: notes || `Penyesuaian stok (${reason})`,
+      notes: notes || `Penyesuaian stok ${items.length} bahan (${reason})`,
       adjustment_reason: reason,
       created_by: currentUser.name,
       created_at: new Date(now).toISOString(),
     };
 
-    const newMov: StockMovement = {
-      id: `mov-${now}`,
-      transaction_id: trxId,
-      ingredient_id: ing.id,
-      type: moveType,
-      quantity: moveQty,
-      balance_after: newStock,
-      description: mode === 'set'
-        ? `Stock Opname (Set Langsung): ${currentStock} -> ${newStock} (${notes || reason})`
-        : `Penyesuaian Stok (${moveType === 'in' ? '+' : '-'}) Alasan: ${reason} - ${notes}`,
-      created_at: new Date(now).toISOString(),
-    };
+    const newMovements: StockMovement[] = [];
+    const updatedIngredients = [...ingredients];
+
+    items.forEach((item, index) => {
+      const ingIndex = updatedIngredients.findIndex(
+        (i) => String(i.id).trim() === String(item.ingredient_id).trim() || String(i.code || '').trim() === String(item.ingredient_id).trim()
+      );
+      if (ingIndex === -1) return;
+
+      const ing = updatedIngredients[ingIndex];
+      const currentStock = getIngredientCurrentStock(ing, [...newMovements, ...stockMovements]);
+      const qty = Math.max(0, Number(item.quantity) || 0);
+
+      let newStock = currentStock;
+      let moveQty = qty;
+      let moveType: 'in' | 'out' = 'out';
+
+      if (item.mode === 'set') {
+        newStock = qty;
+        const diff = newStock - currentStock;
+        moveType = diff >= 0 ? 'in' : 'out';
+        moveQty = Math.abs(diff);
+      } else if (item.mode === 'plus') {
+        newStock = currentStock + qty;
+        moveType = 'in';
+        moveQty = qty;
+      } else {
+        newStock = currentStock - qty;
+        moveType = 'out';
+        moveQty = qty;
+      }
+
+      updatedIngredients[ingIndex] = { ...ing, current_stock: newStock };
+
+      const itemDesc = item.mode === 'set'
+        ? `Stock Opname: ${currentStock} -> ${newStock} (${item.item_notes || reason})`
+        : `Penyesuaian Stok (${moveType === 'in' ? '+' : '-'}) Alasan: ${reason} - ${item.item_notes || notes}`;
+
+      newMovements.push({
+        id: `mov-${now}-${index}`,
+        transaction_id: trxId,
+        ingredient_id: ing.id,
+        type: moveType,
+        quantity: moveQty,
+        balance_after: newStock,
+        description: itemDesc,
+        created_at: new Date(now + index * 10).toISOString(),
+      });
+    });
 
     const nextTrxs = [newTrx, ...transactions];
-    const nextMovs = [newMov, ...stockMovements];
-
-    const updatedIngredients = ingredients.map((i) => (i.id === ing.id ? updatedIng : i));
+    const nextMovs = [...newMovements, ...stockMovements];
 
     setIngredients(updatedIngredients);
     setTransactions(nextTrxs);
     setStockMovements(nextMovs);
 
-    // Save locally
     saveToStorage(STORAGE_KEYS.INGREDIENTS, updatedIngredients);
     saveToStorage(STORAGE_KEYS.TRANSACTIONS, nextTrxs);
     saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, nextMovs);
 
-    syncDataToSupabase([updatedIng], newTrx, [newMov], nextTrxs, nextMovs);
+    const changedIngs = updatedIngredients.filter((ing) =>
+      newMovements.some((m) => m.ingredient_id === ing.id)
+    );
+    syncDataToSupabase(changedIngs, newTrx, newMovements, nextTrxs, nextMovs);
   };
 
   const deleteTransaction = async (transactionId: string) => {
@@ -2223,7 +2369,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return new Date().toISOString().slice(0, 10);
     };
 
-    const targetDate = getYYYYMMDD(dateFilter);
+    const isAllDates = !dateFilter || dateFilter === 'all';
+    const targetDate = isAllDates ? 'all' : getYYYYMMDD(dateFilter);
 
     return ingredients.map((ing) => {
       const unit = units.find((u) => u.id === ing.unit_id) || ({ abbreviation: '-' } as Unit);
@@ -2231,13 +2378,15 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       const liveStock = getIngredientCurrentStock(ing, stockMovements);
 
-      // Movements on targetDate
+      // Movements on targetDate or all dates
       const movementsToday = stockMovements.filter((m) => {
         if (!m || !m.ingredient_id) return false;
         const mId = String(m.ingredient_id).trim().toLowerCase();
         const ingId = String(ing.id).trim().toLowerCase();
         const ingCode = String(ing.code || '').trim().toLowerCase();
         if (mId !== ingId && mId !== ingCode) return false;
+
+        if (isAllDates) return true;
 
         const trx = transactions.find(
           (t) => t.id === m.transaction_id || (t.reference_no && m.description && m.description.includes(t.reference_no))
@@ -2247,19 +2396,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
 
       // Movements created AFTER targetDate (future relative to report date)
-      const movementsAfter = stockMovements.filter((m) => {
-        if (!m || !m.ingredient_id) return false;
-        const mId = String(m.ingredient_id).trim().toLowerCase();
-        const ingId = String(ing.id).trim().toLowerCase();
-        const ingCode = String(ing.code || '').trim().toLowerCase();
-        if (mId !== ingId && mId !== ingCode) return false;
+      const movementsAfter = isAllDates
+        ? []
+        : stockMovements.filter((m) => {
+            if (!m || !m.ingredient_id) return false;
+            const mId = String(m.ingredient_id).trim().toLowerCase();
+            const ingId = String(ing.id).trim().toLowerCase();
+            const ingCode = String(ing.code || '').trim().toLowerCase();
+            if (mId !== ingId && mId !== ingCode) return false;
 
-        const trx = transactions.find(
-          (t) => t.id === m.transaction_id || (t.reference_no && m.description && m.description.includes(t.reference_no))
-        );
-        const mDate = getYYYYMMDD(trx?.transaction_date || m.created_at);
-        return mDate > targetDate;
-      });
+            const trx = transactions.find(
+              (t) => t.id === m.transaction_id || (t.reference_no && m.description && m.description.includes(t.reference_no))
+            );
+            const mDate = getYYYYMMDD(trx?.transaction_date || m.created_at);
+            return mDate > targetDate;
+          });
 
       let in_purchase = 0;
       let in_prepare = 0;
@@ -2277,7 +2428,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         const isPurchase = trxType === 'purchase' || descLower.includes('pembelian') || descLower.includes('beli') || descLower.includes('pur');
         const isPrepare = trxType === 'prepare' || descLower.includes('prepare') || descLower.includes('konversi') || descLower.includes('prep');
-        const isProduction = trxType === 'production' || descLower.includes('produksi') || descLower.includes('porsi') || descLower.includes('prod');
+        const isProduction = trxType === 'production' || descLower.includes('produksi') || descLower.includes('penjualan') || descLower.includes('jual') || descLower.includes('porsi') || descLower.includes('prod');
         const isAdj = trxType === 'adjustment' || descLower.includes('penyesuaian') || descLower.includes('opname') || descLower.includes('init') || descLower.includes('adj');
 
         if (isPurchase) {

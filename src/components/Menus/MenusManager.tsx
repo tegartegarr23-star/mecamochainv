@@ -185,8 +185,10 @@ export const MenusManager: React.FC = () => {
                       <Edit2 className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => {
-                        if (window.confirm(`Hapus menu "${menu.name}"?`)) deleteMenu(menu.id);
+                      onClick={async () => {
+                        if (window.confirm(`Hapus menu "${menu.name}"?`)) {
+                          await deleteMenu(menu.id);
+                        }
                       }}
                       className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50"
                     >
