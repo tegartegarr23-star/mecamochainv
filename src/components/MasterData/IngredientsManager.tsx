@@ -365,9 +365,9 @@ export const IngredientsManager: React.FC = () => {
                                 <Edit2 className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => {
+                                onClick={async () => {
                                   if (window.confirm(`Hapus bahan baku "${ing.name}"?`)) {
-                                    deleteIngredient(ing.id);
+                                    await deleteIngredient(ing.id);
                                   }
                                 }}
                                 className="p-1.5 rounded-lg text-stone-600 hover:bg-rose-50 hover:text-rose-600"

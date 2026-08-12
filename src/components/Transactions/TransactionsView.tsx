@@ -1749,9 +1749,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   const refNo = selectedTrxForDelete.reference_no;
-                  deleteTransaction(selectedTrxForDelete.id);
+                  await deleteTransaction(selectedTrxForDelete.id);
                   setSelectedTrxForDelete(null);
                   setToastMsg(`Transaksi ${refNo} berhasil dihapus dan posisi stok bahan telah dikembalikan ke kondisi semula.`);
                   setTimeout(() => setToastMsg(null), 4000);
