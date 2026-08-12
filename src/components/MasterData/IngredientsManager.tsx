@@ -46,6 +46,7 @@ export const IngredientsManager: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [stockStatusFilter, setStockStatusFilter] = useState('all');
+  const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'code-asc' | 'stock-asc' | 'stock-desc'>('name-asc');
 
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -142,23 +143,42 @@ export const IngredientsManager: React.FC = () => {
     setIsModalOpen(false);
   };
 
-  // Filter Ingredients Logic
-  const filteredIngredients = ingredients.filter((item) => {
-    const matchesSearch =
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.code.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = categoryFilter === 'all' || item.category_id === categoryFilter;
-    const matchesType = typeFilter === 'all' || item.type === typeFilter;
+  // Filter & Sort Ingredients Logic
+  const filteredIngredients = ingredients
+    .filter((item) => {
+      const matchesSearch =
+        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.code.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesCategory = categoryFilter === 'all' || item.category_id === categoryFilter;
+      const matchesType = typeFilter === 'all' || item.type === typeFilter;
 
-    let matchesStatus = true;
-    if (stockStatusFilter === 'critical') {
-      matchesStatus = item.current_stock <= item.min_stock;
-    } else if (stockStatusFilter === 'safe') {
-      matchesStatus = item.current_stock > item.min_stock;
-    }
+      let matchesStatus = true;
+      if (stockStatusFilter === 'critical') {
+        matchesStatus = item.current_stock <= item.min_stock;
+      } else if (stockStatusFilter === 'safe') {
+        matchesStatus = item.current_stock > item.min_stock;
+      }
 
-    return matchesSearch && matchesCategory && matchesType && matchesStatus;
-  });
+      return matchesSearch && matchesCategory && matchesType && matchesStatus;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'name-asc') {
+        return a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
+      }
+      if (sortBy === 'name-desc') {
+        return b.name.localeCompare(a.name, 'id', { sensitivity: 'base' });
+      }
+      if (sortBy === 'code-asc') {
+        return a.code.localeCompare(b.code, 'id', { sensitivity: 'base', numeric: true });
+      }
+      if (sortBy === 'stock-asc') {
+        return a.current_stock - b.current_stock;
+      }
+      if (sortBy === 'stock-desc') {
+        return b.current_stock - a.current_stock;
+      }
+      return 0;
+    });
 
   return (
     <div className="space-y-6">
@@ -260,6 +280,18 @@ export const IngredientsManager: React.FC = () => {
                 <option value="all">Semua Status Stok</option>
                 <option value="critical">Stok Kritis (Min Stock)</option>
                 <option value="safe">Stok Aman</option>
+              </select>
+
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="text-xs font-medium px-2.5 py-1.5 rounded-md bg-amber-50 border border-amber-200 text-amber-900 focus:outline-none"
+              >
+                <option value="name-asc">Urutan: Nama (A - Z)</option>
+                <option value="name-desc">Urutan: Nama (Z - A)</option>
+                <option value="code-asc">Urutan: Kode Bahan</option>
+                <option value="stock-asc">Urutan: Stok Terkecil</option>
+                <option value="stock-desc">Urutan: Stok Terbanyak</option>
               </select>
 
               <button

@@ -185,7 +185,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [units, setUnits] = useState<Unit[]>(() => loadFromStorage(STORAGE_KEYS.UNITS, INITIAL_UNITS));
   const [categories, setCategories] = useState<Category[]>(() => loadFromStorage(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES));
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => loadFromStorage(STORAGE_KEYS.SUPPLIERS, INITIAL_SUPPLIERS));
-  const [ingredients, setIngredients] = useState<Ingredient[]>(() => loadFromStorage(STORAGE_KEYS.INGREDIENTS, INITIAL_INGREDIENTS));
+  const [ingredients, setIngredients] = useState<Ingredient[]>(() => {
+    const loaded = loadFromStorage(STORAGE_KEYS.INGREDIENTS, INITIAL_INGREDIENTS);
+    const deletedIds = getSavedDeletedIngIds();
+    if (!deletedIds || deletedIds.size === 0) return loaded;
+    return loaded.filter((ing) => {
+      const idStr = String(ing.id).trim();
+      const codeStr = String(ing.code || '').trim();
+      return (
+        !deletedIds.has(idStr) &&
+        !deletedIds.has(idStr.toLowerCase()) &&
+        (!codeStr || (!deletedIds.has(codeStr) && !deletedIds.has(codeStr.toLowerCase())))
+      );
+    });
+  });
   const [menus, setMenus] = useState<Menu[]>(() => loadFromStorage(STORAGE_KEYS.MENUS, INITIAL_MENUS));
   const [recipes, setRecipes] = useState<Recipe[]>(() => loadFromStorage(STORAGE_KEYS.RECIPES, INITIAL_RECIPES));
   const [recipeDetails, setRecipeDetails] = useState<RecipeDetail[]>(() => sanitizeRecipeDetails(loadFromStorage(STORAGE_KEYS.RECIPE_DETAILS, INITIAL_RECIPE_DETAILS)));
@@ -549,16 +562,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
 
       setIngredients((prevIngs) => {
-        const localActive = prevIngs.filter(
-          (ing) =>
-            !deletedIngIdsRef.current.has(String(ing.id).trim()) &&
-            !deletedIngIdsRef.current.has(String(ing.code || '').trim())
-        );
-        const remoteActive = cleanIngredients.filter(
-          (ing) =>
-            !deletedIngIdsRef.current.has(String(ing.id).trim()) &&
-            !deletedIngIdsRef.current.has(String(ing.code || '').trim())
-        );
+        const isDeleted = (ing: Ingredient) => {
+          const idStr = String(ing.id).trim();
+          const codeStr = String(ing.code || '').trim();
+          return (
+            deletedIngIdsRef.current.has(idStr) ||
+            deletedIngIdsRef.current.has(idStr.toLowerCase()) ||
+            (codeStr !== '' &&
+              (deletedIngIdsRef.current.has(codeStr) || deletedIngIdsRef.current.has(codeStr.toLowerCase())))
+          );
+        };
+
+        const localActive = prevIngs.filter((ing) => !isDeleted(ing));
+        const remoteActive = cleanIngredients.filter((ing) => !isDeleted(ing));
         const mergedIngs = mergeByField(localActive, remoteActive, 'id').map((ing) => ({
           ...ing,
           current_stock: getIngredientCurrentStock(ing, currentMovementsList),
@@ -1100,15 +1116,22 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteIngredient = async (id: string) => {
+    const cleanId = String(id).trim();
     const targetIng = ingredients.find(
-      (i) => String(i.id).trim() === String(id).trim() || String(i.code).trim() === String(id).trim()
+      (i) =>
+        String(i.id).trim().toLowerCase() === cleanId.toLowerCase() ||
+        String(i.code || '').trim().toLowerCase() === cleanId.toLowerCase()
     );
 
-    const ingId = targetIng ? targetIng.id : id;
-    const ingCode = targetIng ? targetIng.code : undefined;
+    const ingId = targetIng ? String(targetIng.id).trim() : cleanId;
+    const ingCode = targetIng ? String(targetIng.code || '').trim() : undefined;
 
-    deletedIngIdsRef.current.add(String(ingId).trim());
-    if (ingCode) deletedIngIdsRef.current.add(String(ingCode).trim());
+    deletedIngIdsRef.current.add(ingId);
+    deletedIngIdsRef.current.add(ingId.toLowerCase());
+    if (ingCode) {
+      deletedIngIdsRef.current.add(ingCode);
+      deletedIngIdsRef.current.add(ingCode.toLowerCase());
+    }
 
     try {
       localStorage.setItem(
@@ -1118,11 +1141,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } catch {}
 
     setIngredients((prev) => {
-      const next = prev.filter(
-        (item) =>
-          String(item.id).trim() !== String(ingId).trim() &&
-          (!ingCode || String(item.code || '').trim() !== String(ingCode).trim())
-      );
+      const next = prev.filter((item) => {
+        const itemId = String(item.id).trim().toLowerCase();
+        const itemCode = String(item.code || '').trim().toLowerCase();
+        return (
+          itemId !== ingId.toLowerCase() &&
+          (!ingCode || itemCode !== ingCode.toLowerCase())
+        );
+      });
       saveToStorage(STORAGE_KEYS.INGREDIENTS, next);
       return next;
     });
@@ -1130,8 +1156,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     try {
       const supabase = getSupabase();
       if (supabase) {
-        await supabase.from('ingredients').delete().eq('id', ingId);
+        // Delete child rows referencing this ingredient first to satisfy Foreign Key constraints
+        try { await supabase.from('recipe_details').delete().eq('ingredient_id', ingId); } catch {}
+        try { await supabase.from('recipe_items').delete().eq('ingredient_id', ingId); } catch {}
+        try { await supabase.from('stock_movements').delete().eq('ingredient_id', ingId); } catch {}
+        try { await supabase.from('stock_moved').delete().eq('ingredient_id', ingId); } catch {}
+
         if (ingCode) {
+          try { await supabase.from('recipe_details').delete().eq('ingredient_id', ingCode); } catch {}
+          try { await supabase.from('recipe_items').delete().eq('ingredient_id', ingCode); } catch {}
+          try { await supabase.from('stock_movements').delete().eq('ingredient_id', ingCode); } catch {}
+          try { await supabase.from('stock_moved').delete().eq('ingredient_id', ingCode); } catch {}
+        }
+
+        const { error: delErr } = await supabase.from('ingredients').delete().eq('id', ingId);
+        if (delErr && ingCode) {
           await supabase.from('ingredients').delete().eq('code', ingCode);
         }
       }
