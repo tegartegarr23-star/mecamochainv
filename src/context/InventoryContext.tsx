@@ -1727,7 +1727,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           quantity: qty,
           balance_after: newStock,
           description: `Pembelian dari ${supplierName} (${actualRefNo})`,
-          created_at: new Date(now + index * 10).toISOString(),
+          created_at: new Date(new Date(isoDate).getTime() + index * 10).toISOString(),
         });
       }
     });
@@ -1807,7 +1807,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           description: item.is_target
             ? `Hasil Proses Prepare / Konversi (${actualRefNo})`
             : `Pemakaian Bahan Mentah untuk Prepare (${actualRefNo})`,
-          created_at: new Date(now + index * 10).toISOString(),
+          created_at: new Date(new Date(isoDate).getTime() + index * 10).toISOString(),
         });
       }
     });
@@ -1958,7 +1958,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           quantity: req.requiredQty,
           balance_after: newStock,
           description: `Penjualan ${req.portionCount} porsi ${req.menuName} (${actualRefNo})`,
-          created_at: new Date(now + index * 10).toISOString(),
+          created_at: new Date(new Date(isoDate).getTime() + index * 10).toISOString(),
         });
       }
     });
@@ -2101,7 +2101,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         quantity: moveQty,
         balance_after: newStock,
         description: itemDesc,
-        created_at: new Date(now + index * 10).toISOString(),
+        created_at: new Date(new Date(isoDate).getTime() + index * 10).toISOString(),
       });
     });
 

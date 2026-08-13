@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Search, ChevronDown, Check, X, Package } from 'lucide-react';
 import { Ingredient } from '../../types';
 import { formatNumber } from '../../utils/formatters';
+import { useInventory } from '../../context/InventoryContext';
 
 interface SearchableIngredientSelectProps {
   ingredients: Ingredient[];
@@ -26,6 +27,7 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
   disabled = false,
   filterType = 'all',
 }) => {
+  const { categories } = useInventory();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -44,6 +46,15 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
     const matchName = ing.name.toLowerCase().includes(q);
     const matchCode = ing.code.toLowerCase().includes(q);
     return matchName || matchCode;
+  });
+
+  // Sort alphabetically per category then name
+  const sortedIngredients = [...matchingIngredients].sort((a, b) => {
+    const catA = categories.find((c) => c.id === a.category_id)?.name || '';
+    const catB = categories.find((c) => c.id === b.category_id)?.name || '';
+    const catCompare = catA.localeCompare(catB, 'id', { sensitivity: 'base' });
+    if (catCompare !== 0) return catCompare;
+    return a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
   });
 
   const selectedIngredient = ingredients.find((ing) => ing.id === value);
@@ -136,14 +147,16 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
 
           {/* List Items */}
           <div className="max-h-60 overflow-y-auto divide-y divide-stone-50 p-1">
-            {matchingIngredients.length === 0 ? (
+            {sortedIngredients.length === 0 ? (
               <div className="p-4 text-center text-xs text-stone-400 flex flex-col items-center justify-center gap-1">
                 <Package className="w-6 h-6 text-stone-300" />
                 <span>Bahan "{searchQuery}" tidak ditemukan</span>
               </div>
             ) : (
-              matchingIngredients.map((ing) => {
+              sortedIngredients.map((ing) => {
                 const isSelected = ing.id === value;
+                const catName = categories.find((c) => c.id === ing.category_id)?.name;
+
                 return (
                   <button
                     key={ing.id}
@@ -160,6 +173,11 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
                         {ing.code}
                       </span>
                       <span className="truncate font-semibold">{ing.name}</span>
+                      {catName && (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-stone-100 text-stone-600 shrink-0 border border-stone-200/40">
+                          {catName}
+                        </span>
+                      )}
                       <span
                         className={`px-1.5 py-0.2 rounded text-[9px] font-bold shrink-0 ${
                           ing.type === 'prepared'

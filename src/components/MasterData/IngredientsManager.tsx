@@ -46,7 +46,7 @@ export const IngredientsManager: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [stockStatusFilter, setStockStatusFilter] = useState('all');
-  const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'code-asc' | 'stock-asc' | 'stock-desc'>('name-asc');
+  const [sortBy, setSortBy] = useState<'category-asc' | 'name-asc' | 'name-desc' | 'code-asc' | 'stock-asc' | 'stock-desc'>('category-asc');
 
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -62,6 +62,8 @@ export const IngredientsManager: React.FC = () => {
     min_stock: '0',
     initial_stock: '0',
     cost_per_unit: '0',
+    total_package_cost: '',
+    package_quantity: '',
     is_active: true,
   });
 
@@ -91,6 +93,8 @@ export const IngredientsManager: React.FC = () => {
         min_stock: String(ing.min_stock),
         initial_stock: String(ing.current_stock),
         cost_per_unit: String(ing.cost_per_unit || 0),
+        total_package_cost: '',
+        package_quantity: '',
         is_active: ing.is_active,
       });
     } else {
@@ -104,6 +108,8 @@ export const IngredientsManager: React.FC = () => {
         min_stock: '100',
         initial_stock: '0',
         cost_per_unit: '0',
+        total_package_cost: '',
+        package_quantity: '',
         is_active: true,
       });
     }
@@ -162,6 +168,13 @@ export const IngredientsManager: React.FC = () => {
       return matchesSearch && matchesCategory && matchesType && matchesStatus;
     })
     .sort((a, b) => {
+      if (sortBy === 'category-asc') {
+        const catA = categories.find((c) => c.id === a.category_id)?.name || '';
+        const catB = categories.find((c) => c.id === b.category_id)?.name || '';
+        const catCompare = catA.localeCompare(catB, 'id', { sensitivity: 'base' });
+        if (catCompare !== 0) return catCompare;
+        return a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
+      }
       if (sortBy === 'name-asc') {
         return a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
       }
@@ -285,8 +298,9 @@ export const IngredientsManager: React.FC = () => {
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
-                className="text-xs font-medium px-2.5 py-1.5 rounded-md bg-amber-50 border border-amber-200 text-amber-900 focus:outline-none"
+                className="text-xs font-bold px-2.5 py-1.5 rounded-md bg-amber-50 border border-amber-200 text-amber-900 focus:outline-none"
               >
+                <option value="category-asc">Urutan: Abjad per Kategori (A - Z)</option>
                 <option value="name-asc">Urutan: Nama (A - Z)</option>
                 <option value="name-desc">Urutan: Nama (Z - A)</option>
                 <option value="code-asc">Urutan: Kode Bahan</option>
@@ -844,6 +858,53 @@ export const IngredientsManager: React.FC = () => {
                 </div>
               </div>
 
+              <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-stone-800">Kalkulator Harga per Unit (Otomatis)</span>
+                  <span className="text-[10px] text-stone-500">Hitung Otomatis dari Total Beli</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-stone-600 mb-0.5">Total Harga Kemasan (Rp)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      placeholder="Cth: 150000"
+                      value={formData.total_package_cost}
+                      onChange={(e) => {
+                        const totalCost = e.target.value;
+                        const pkgQty = Number(formData.package_quantity) || 0;
+                        let computedUnitCost = formData.cost_per_unit;
+                        if (totalCost && pkgQty > 0) {
+                          computedUnitCost = String(Math.round((Number(totalCost) / pkgQty) * 100) / 100);
+                        }
+                        setFormData({ ...formData, total_package_cost: totalCost, cost_per_unit: computedUnitCost });
+                      }}
+                      className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white border border-stone-200 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-stone-600 mb-0.5">Isi/Jumlah Kemasan</label>
+                    <input
+                      type="number"
+                      step="any"
+                      placeholder="Cth: 1000"
+                      value={formData.package_quantity}
+                      onChange={(e) => {
+                        const pkgQty = e.target.value;
+                        const totalCost = Number(formData.total_package_cost) || 0;
+                        let computedUnitCost = formData.cost_per_unit;
+                        if (totalCost > 0 && Number(pkgQty) > 0) {
+                          computedUnitCost = String(Math.round((totalCost / Number(pkgQty)) * 100) / 100);
+                        }
+                        setFormData({ ...formData, package_quantity: pkgQty, cost_per_unit: computedUnitCost });
+                      }}
+                      className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg bg-white border border-stone-200 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-stone-700 mb-1">Batas Stok Min</label>
@@ -870,13 +931,14 @@ export const IngredientsManager: React.FC = () => {
                   </div>
                 )}
                 <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Estimasi Biaya / Unit (Rp)</label>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Harga / Unit (Rp)</label>
                   <input
                     type="number"
                     step="any"
+                    required
                     value={formData.cost_per_unit}
                     onChange={(e) => setFormData({ ...formData, cost_per_unit: e.target.value })}
-                    className="w-full px-3 py-2 text-xs font-mono rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
+                    className="w-full px-3 py-2 text-xs font-mono font-bold text-amber-900 rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
                   />
                 </div>
               </div>

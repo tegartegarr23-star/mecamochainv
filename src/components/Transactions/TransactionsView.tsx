@@ -194,26 +194,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
   const handleTargetQtyChange = (newVal: number) => {
     setPrepTargetQty(newVal);
-
-    if (newVal > 0 && lastValidTargetQty.current > 0) {
-      const factor = newVal / lastValidTargetQty.current;
-      setPrepItems((prev) =>
-        prev.map((item) => {
-          if (item.is_target) {
-            return { ...item, ingredient_id: prepTargetIngId, quantity: newVal };
-          }
-          return {
-            ...item,
-            quantity: Math.round(item.quantity * factor * 100) / 100,
-          };
-        })
-      );
-      lastValidTargetQty.current = newVal;
-    } else if (newVal === 0) {
-      setPrepItems((prev) =>
-        prev.map((item) => (item.is_target ? { ...item, quantity: 0 } : item))
-      );
-    }
+    setPrepItems((prev) =>
+      prev.map((item) => {
+        if (item.is_target) {
+          return { ...item, ingredient_id: prepTargetIngId, quantity: newVal };
+        }
+        return item;
+      })
+    );
   };
 
   const handleSavePrepareFormula = () => {
@@ -1043,10 +1031,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
               {/* Table Header Labels */}
               <div className="hidden sm:grid grid-cols-12 gap-2 px-3 py-1.5 bg-stone-100 rounded-lg text-[10px] font-bold text-stone-600 uppercase tracking-wider">
-                <div className="col-span-5">Bahan Baku</div>
+                <div className="col-span-4">Bahan Baku</div>
                 <div className="col-span-2 text-center">Jumlah (Qty)</div>
-                <div className="col-span-2 text-center">Harga Satuan (Rp)</div>
-                <div className="col-span-2 text-right">Subtotal (Rp)</div>
+                <div className="col-span-2 text-center">Total Harga (Rp)</div>
+                <div className="col-span-3 text-center">Harga Satuan / Unit (Rp)</div>
                 <div className="col-span-1 text-center">Hapus</div>
               </div>
 
@@ -1062,7 +1050,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                       className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center p-3 rounded-xl bg-stone-50 border border-stone-200"
                     >
                       {/* Ingredient Select */}
-                      <div className="sm:col-span-5">
+                      <div className="sm:col-span-4">
                         <label className="block text-[10px] font-semibold text-stone-500 sm:hidden mb-1">
                           Pilih Bahan Baku
                         </label>
@@ -1096,8 +1084,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                             placeholder="Qty"
                             value={item.quantity}
                             onChange={(e) => {
+                              const newQty = Number(e.target.value) || 0;
                               const newItems = [...purItems];
-                              newItems[idx].quantity = Number(e.target.value);
+                              newItems[idx].quantity = newQty;
                               setPurItems(newItems);
                             }}
                             className="w-full text-xs font-mono font-bold text-stone-900 focus:outline-none"
@@ -1108,14 +1097,41 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                         </div>
                       </div>
 
-                      {/* Unit Price Input with Rp Prefix */}
+                      {/* Total Price Input (Automatic Division) */}
                       <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-semibold text-stone-500 sm:hidden mb-1">
+                          Total Harga Beli (Rp)
+                        </label>
+                        <div className="flex items-center bg-white border border-stone-200 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
+                          <span className="px-1.5 py-1.5 text-[10px] font-bold text-stone-500 bg-stone-100 border-r border-stone-200 shrink-0">
+                            Total Rp
+                          </span>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            placeholder="Total Rp"
+                            value={subtotal ? Math.round(subtotal * 100) / 100 : ''}
+                            onChange={(e) => {
+                              const totalCost = Number(e.target.value) || 0;
+                              const qty = item.quantity || 1;
+                              const newItems = [...purItems];
+                              newItems[idx].unit_price = qty > 0 ? Math.round((totalCost / qty) * 100) / 100 : 0;
+                              setPurItems(newItems);
+                            }}
+                            className="w-full px-2 py-1.5 text-xs font-mono font-bold text-emerald-900 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Unit Price Input with Rp Prefix */}
+                      <div className="sm:col-span-3">
                         <label className="block text-[10px] font-semibold text-stone-500 sm:hidden mb-1">
                           Harga Satuan (Rp)
                         </label>
                         <div className="flex items-center bg-white border border-stone-200 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
                           <span className="px-2 py-1.5 text-[10px] font-bold text-stone-500 bg-stone-100 border-r border-stone-200 shrink-0">
-                            Rp
+                            Rp/Unit
                           </span>
                           <input
                             type="number"
@@ -1131,14 +1147,6 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                             className="w-full px-2 py-1.5 text-xs font-mono font-bold text-stone-900 focus:outline-none"
                           />
                         </div>
-                      </div>
-
-                      {/* Subtotal Display */}
-                      <div className="sm:col-span-2 text-right">
-                        <span className="text-[10px] text-stone-400 sm:hidden">Subtotal: </span>
-                        <span className="text-xs font-extrabold text-emerald-900 font-mono">
-                          {formatCurrency(subtotal)}
-                        </span>
                       </div>
 
                       {/* Remove Button */}
