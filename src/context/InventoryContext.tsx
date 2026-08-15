@@ -2251,6 +2251,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const primaryMenuId = items[0]?.menu_id || '';
     const totalPortions = items.reduce((sum, i) => sum + i.portion_count, 0);
 
+    const menuSummaryParts = items.map((item) => {
+      const m = menus.find((menu) => menu.id === item.menu_id);
+      return `${item.portion_count} porsi ${m ? m.name : 'Menu'}`;
+    });
+    const defaultMenuSummary = `Terjual ${menuSummaryParts.join(', ')}`;
+    const finalNotes = notes ? `${notes} (${defaultMenuSummary})` : defaultMenuSummary;
+
     const newTrx: Transaction = {
       id: trxId,
       type: 'production',
@@ -2258,7 +2265,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       reference_no: actualRefNo,
       menu_id: primaryMenuId,
       portion_count: totalPortions,
-      notes: notes || `Penjualan ${items.length} menu items (${totalPortions} porsi)`,
+      notes: finalNotes,
       created_by: currentUser.name,
       created_at: new Date(now).toISOString(),
     };

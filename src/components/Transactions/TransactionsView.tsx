@@ -18,6 +18,7 @@ import {
   Eye,
   X,
   Search,
+  Utensils,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
 import { SearchableIngredientSelect } from '../Common/SearchableIngredientSelect';
@@ -27,6 +28,7 @@ import {
   PurchaseItemInput,
   PrepareItemInput,
   Transaction,
+  StockMovement,
 } from '../../types';
 import { formatNumber, formatCurrency, formatDate, generateRefNo } from '../../utils/formatters';
 
@@ -474,6 +476,44 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
   const todayYMD = getYYYYMMDD(new Date().toISOString());
   const yesterdayYMD = getDateDaysAgo(1);
+
+  const getProductionSoldItems = (trx: Transaction, trxMovs: StockMovement[]) => {
+    const menuMap = new Map<string, number>();
+
+    for (const m of trxMovs) {
+      if (m.description) {
+        const match = m.description.match(/(?:Penjualan|Produksi)\s+([\d.]+)\s+porsi\s+(.+?)(?:\s+\(|$)/i);
+        if (match) {
+          const qty = parseFloat(match[1]) || 1;
+          const name = match[2].trim();
+          menuMap.set(name, qty);
+        }
+      }
+    }
+
+    if (menuMap.size === 0) {
+      if (trx.notes) {
+        const notesClean = trx.notes.replace(/^Terjual\s+/i, '').replace(/[\(\)\[\]]/g, '');
+        const parts = notesClean.split(',');
+        for (const part of parts) {
+          const match = part.match(/([\d.]+)\s*porsi\s*(.+)/i) || part.match(/([\d.]+)\s*x\s*(.+)/i);
+          if (match) {
+            menuMap.set(match[2].trim(), parseFloat(match[1]) || 1);
+          }
+        }
+      }
+      if (menuMap.size === 0 && trx.menu_id) {
+        const menu = menus.find((m) => m.id === trx.menu_id || m.name === trx.menu_id);
+        const name = menu ? menu.name : 'Menu';
+        menuMap.set(name, trx.portion_count || 1);
+      }
+    }
+
+    return Array.from(menuMap.entries()).map(([name, count]) => ({
+      name,
+      count,
+    }));
+  };
 
   const filteredTransactions = transactions.filter((t) => {
     if (historyTypeFilter !== 'all' && t.type !== historyTypeFilter) return false;
@@ -1639,7 +1679,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                       adjustment: 'bg-purple-100 text-purple-800',
                     }[trx.type];
 
-                    let detailText = trx.notes || '-';
+                    let detailContent: React.ReactNode = trx.notes || '-';
                     const trxMovs = stockMovements.filter(
                       (m) =>
                         m.transaction_id === trx.id ||
@@ -1647,23 +1687,89 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                     );
 
                     if (trx.type === 'purchase') {
-                      const supplier = suppliers.find((s) => s.id === trx.supplier_id);
-                      const supplierName = supplier ? supplier.name : 'Supplier';
-                      detailText = `Pembelian dari ${supplierName} (${trxMovs.length > 0 ? `${trxMovs.length} jenis bahan` : 'Bahan Baku'})${trx.notes ? ` - ${trx.notes}` : ''}`;
+                      const supplier = suppliers.find((s) => s.id === trx.supplier_id || s.name === trx.supplier_id);
+                      const supplierName = supplier ? supplier.name : (trx.supplier_id || 'Supplier');
+                      detailContent = (
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-stone-900 flex items-center gap-1.5 flex-wrap">
+                            <span>🛒 Pembelian dari {supplierName}</span>
+                            <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                              +{trxMovs.length > 0 ? trxMovs.length : 1} item bahan
+                            </span>
+                          </div>
+                          {trx.notes && <p className="text-[11px] text-stone-500 italic">{trx.notes}</p>}
+                        </div>
+                      );
                     } else if (trx.type === 'prepare') {
                       const targetMov = trxMovs.find((m) => m.type === 'in');
                       const targetIng = ingredients.find((i) => i.id === targetMov?.ingredient_id || i.code === targetMov?.ingredient_id);
+                      const targetUnit = units.find((u) => u.id === targetIng?.unit_id);
                       const sourceCount = trxMovs.filter((m) => m.type === 'out').length;
                       const targetName = targetIng ? targetIng.name : 'Bahan PP';
-                      detailText = `Prepare ${targetName} (+${formatNumber(targetMov?.quantity || 0)}) dari ${sourceCount} bahan mentah${trx.notes ? ` - ${trx.notes}` : ''}`;
+                      detailContent = (
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-stone-900 flex items-center gap-1.5 flex-wrap">
+                            <span>🍳 Prepare: {targetName}</span>
+                            <span className="text-[10px] font-bold text-blue-800 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                              +{formatNumber(targetMov?.quantity || 0)} {targetUnit?.abbreviation || 'unit'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-stone-500">
+                            Mengonversi dari {sourceCount} jenis bahan mentah{trx.notes ? ` • ${trx.notes}` : ''}
+                          </p>
+                        </div>
+                      );
                     } else if (trx.type === 'production') {
-                      const menu = menus.find((m) => m.id === trx.menu_id);
-                      detailText = `Produksi ${trx.portion_count || 1} porsi ${menu ? menu.name : 'Menu'}${trx.notes ? ` (${trx.notes})` : ''}`;
+                      const soldItems = getProductionSoldItems(trx, trxMovs);
+                      const totalSoldPortions = soldItems.length > 0
+                        ? soldItems.reduce((acc, s) => acc + s.count, 0)
+                        : (trx.portion_count || 1);
+                      const soldSummaryText = soldItems.length > 0
+                        ? soldItems.map((s) => `${s.count} porsi ${s.name}`).join(', ')
+                        : (trx.menu_id ? `${trx.portion_count || 1} porsi ${menus.find(m => m.id === trx.menu_id)?.name || 'Menu'}` : `${trx.portion_count || 1} porsi Menu`);
+
+                      detailContent = (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-amber-950 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 text-xs inline-flex items-center gap-1">
+                              <Utensils className="w-3 h-3 text-amber-700 shrink-0" />
+                              <span>Terjual: {soldSummaryText}</span>
+                            </span>
+                            <span className="text-[10px] font-extrabold text-amber-900 bg-amber-100/70 px-1.5 py-0.5 rounded border border-amber-300">
+                              Total {totalSoldPortions} Porsi
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-stone-500 flex items-center gap-1">
+                            <span>📉 Memotong {trxMovs.length} bahan baku</span>
+                            {trx.notes && !trx.notes.includes(soldSummaryText) && (
+                              <span className="italic text-stone-400">• {trx.notes}</span>
+                            )}
+                          </p>
+                        </div>
+                      );
                     } else if (trx.type === 'adjustment') {
                       const adjIng = ingredients.find((i) => i.id === trxMovs[0]?.ingredient_id || i.code === trxMovs[0]?.ingredient_id);
                       const ingName = adjIng ? adjIng.name : 'Bahan';
+                      const unit = units.find((u) => u.id === adjIng?.unit_id);
                       const moveType = trxMovs[0]?.type === 'in' ? '+' : '-';
-                      detailText = `Penyesuaian ${ingName} (${moveType}${formatNumber(trxMovs[0]?.quantity || 0)}) [${trx.adjustment_reason || 'Opname'}]${trx.notes ? ` - ${trx.notes}` : ''}`;
+                      detailContent = (
+                        <div className="space-y-0.5">
+                          <div className="font-bold text-stone-900 flex items-center gap-1.5 flex-wrap">
+                            <span>⚖️ Penyesuaian: {ingName}</span>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                              trxMovs[0]?.type === 'in'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-rose-50 text-rose-800 border-rose-200'
+                            }`}>
+                              {moveType}{formatNumber(trxMovs[0]?.quantity || 0)} {unit?.abbreviation || 'unit'}
+                            </span>
+                            <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
+                              {trx.adjustment_reason || 'Opname'}
+                            </span>
+                          </div>
+                          {trx.notes && <p className="text-[11px] text-stone-500 italic">{trx.notes}</p>}
+                        </div>
+                      );
                     }
 
                     return (
@@ -1675,7 +1781,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                             {typeLabel}
                           </span>
                         </td>
-                        <td className="p-3.5 text-stone-700 font-medium">{detailText}</td>
+                        <td className="p-3.5 text-stone-700 font-medium">{detailContent}</td>
                         <td className="p-3.5 text-stone-600 font-medium whitespace-nowrap">{trx.created_by}</td>
                         <td className="p-3.5 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
@@ -1772,12 +1878,79 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                 </div>
               )}
 
-              {selectedTrxForDetail.type === 'production' && selectedTrxForDetail.menu_id && (
-                <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-center justify-between">
-                  <span className="font-bold">Menu Diproduksi:</span>
-                  <span className="font-extrabold">
-                    {menus.find((m) => m.id === selectedTrxForDetail.menu_id)?.name || 'Menu'} ({selectedTrxForDetail.portion_count || 1} Porsi)
-                  </span>
+              {selectedTrxForDetail.type === 'production' && (
+                <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-amber-950 flex items-center gap-1.5">
+                      <Utensils className="w-4 h-4 text-amber-800" />
+                      <span>Rincian Menu & Jumlah Porsi Terjual</span>
+                    </span>
+                    {(() => {
+                      const modalTrxMovs = stockMovements.filter(
+                        (m) =>
+                          m.transaction_id === selectedTrxForDetail.id ||
+                          (selectedTrxForDetail.reference_no &&
+                            m.description &&
+                            m.description.includes(selectedTrxForDetail.reference_no))
+                      );
+                      const modalSoldItems = getProductionSoldItems(selectedTrxForDetail, modalTrxMovs);
+                      const totalPortions = modalSoldItems.length > 0
+                        ? modalSoldItems.reduce((acc, s) => acc + s.count, 0)
+                        : (selectedTrxForDetail.portion_count || 1);
+                      return (
+                        <span className="px-2.5 py-1 bg-amber-800 text-white font-extrabold text-[11px] rounded-xl">
+                          Total: {totalPortions} Porsi
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {(() => {
+                      const modalTrxMovs = stockMovements.filter(
+                        (m) =>
+                          m.transaction_id === selectedTrxForDetail.id ||
+                          (selectedTrxForDetail.reference_no &&
+                            m.description &&
+                            m.description.includes(selectedTrxForDetail.reference_no))
+                      );
+                      const modalSoldItems = getProductionSoldItems(selectedTrxForDetail, modalTrxMovs);
+
+                      if (modalSoldItems.length === 0) {
+                        const m = menus.find((menu) => menu.id === selectedTrxForDetail.menu_id);
+                        return (
+                          <div className="p-2.5 bg-white rounded-xl border border-amber-200/80 flex items-center justify-between">
+                            <span className="font-bold text-stone-900">{m ? m.name : 'Menu'}</span>
+                            <span className="font-extrabold text-amber-900">{selectedTrxForDetail.portion_count || 1} Porsi</span>
+                          </div>
+                        );
+                      }
+
+                      return modalSoldItems.map((item, idx) => {
+                        const matchedMenu = menus.find((m) => m.name.toLowerCase() === item.name.toLowerCase());
+                        return (
+                          <div key={idx} className="p-2.5 bg-white rounded-xl border border-amber-200/80 flex items-center justify-between shadow-2xs">
+                            <div>
+                              <span className="font-bold text-stone-900 block">{item.name}</span>
+                              <span className="text-[10px] text-stone-400">
+                                {matchedMenu?.category || 'Menu POS'} {matchedMenu?.price ? `• Rp ${formatNumber(matchedMenu.price)}/porsi` : ''}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span className="font-extrabold text-amber-900 text-sm block">
+                                {item.count} <span className="text-[10px] text-amber-700">Porsi</span>
+                              </span>
+                              {matchedMenu?.price ? (
+                                <span className="text-[10px] text-emerald-700 font-bold block">
+                                  Rp {formatNumber(matchedMenu.price * item.count)}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
                 </div>
               )}
 
