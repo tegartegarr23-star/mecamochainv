@@ -249,16 +249,16 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
       {isOpen && (
         <div
           ref={listRef}
-          className="absolute left-0 top-full mt-1.5 z-50 bg-white rounded-2xl border border-stone-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 min-w-[320px] sm:min-w-[380px] md:min-w-[440px] max-w-[92vw]"
-          style={{ width: 'max-content' }}
+          className="absolute left-0 top-full mt-1.5 z-50 bg-white rounded-2xl border border-stone-300 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 w-[320px] sm:w-[420px] md:w-[480px] max-w-[95vw]"
+          onMouseDown={(e) => e.stopPropagation()}
         >
           {/* Quick Category Filter Pills */}
-          <div className="p-2.5 border-b border-stone-100 bg-stone-50/95 space-y-1.5">
-            <div className="flex items-center justify-between text-[11px] px-1 text-stone-500 font-semibold">
-              <span className="flex items-center gap-1 text-stone-600">
+          <div className="p-3 border-b border-stone-200 bg-stone-50 space-y-2">
+            <div className="flex items-center justify-between text-xs px-1 text-stone-600 font-semibold">
+              <span className="flex items-center gap-1.5 text-stone-700 font-bold">
                 <Utensils className="w-3.5 h-3.5 text-amber-700" /> Kategori Menu:
               </span>
-              <span className="text-[10px] font-bold text-stone-400">
+              <span className="text-[11px] font-bold text-stone-500 bg-stone-200/80 px-2 py-0.5 rounded-full">
                 {filteredMenus.length} menu (A - Z)
               </span>
             </div>
@@ -266,11 +266,14 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
               <button
                 type="button"
-                onClick={() => setCatFilter('all')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg shrink-0 transition-all ${
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setCatFilter('all');
+                }}
+                className={`px-3 py-1 text-xs font-bold rounded-lg shrink-0 transition-all ${
                   catFilter === 'all'
                     ? 'bg-amber-800 text-white shadow-xs'
-                    : 'bg-white text-stone-600 hover:bg-stone-200 border border-stone-200'
+                    : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-300'
                 }`}
               >
                 Semua ({menus.length})
@@ -281,11 +284,14 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                   <button
                     key={cat}
                     type="button"
-                    onClick={() => setCatFilter(cat)}
-                    className={`px-2.5 py-1 text-[11px] font-bold rounded-lg shrink-0 transition-all ${
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setCatFilter(cat);
+                    }}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg shrink-0 transition-all ${
                       catFilter === cat
                         ? 'bg-amber-800 text-white shadow-xs'
-                        : 'bg-white text-stone-600 hover:bg-stone-200 border border-stone-200'
+                        : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-300'
                     }`}
                   >
                     {cat} {count > 0 ? `(${count})` : ''}
@@ -296,10 +302,21 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
           </div>
 
           {/* List Options (Alphabetical A-Z, wide & clear) */}
-          <div className="max-h-64 overflow-y-auto divide-y divide-stone-100 p-1.5">
+          <div className="max-h-72 overflow-y-auto divide-y divide-stone-100 p-1.5">
             {filteredMenus.length === 0 ? (
-              <div className="p-6 text-center text-xs text-stone-400 font-medium italic">
-                Menu "{inputText}" tidak ditemukan
+              <div className="p-6 text-center text-xs text-stone-500 font-medium italic space-y-2">
+                <p>Menu "{inputText}" tidak ditemukan</p>
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setInputText('');
+                    setCatFilter('all');
+                  }}
+                  className="px-3 py-1 bg-amber-100 text-amber-900 rounded-lg text-xs font-bold hover:bg-amber-200"
+                >
+                  Tampilkan Semua Menu
+                </button>
               </div>
             ) : (
               filteredMenus.map((m, idx) => {
@@ -314,9 +331,13 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                   <button
                     key={m.id}
                     type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      handleSelect(m);
+                    }}
                     onClick={() => handleSelect(m)}
                     onMouseEnter={() => setHighlightedIndex(idx)}
-                    className={`w-full text-left px-3 py-2.5 rounded-xl text-xs flex items-center justify-between gap-3 transition-all ${
+                    className={`w-full text-left px-3.5 py-3 rounded-xl text-xs flex items-center justify-between gap-3 transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-amber-100 text-amber-950 font-bold border border-amber-300 shadow-2xs'
                         : isHighlighted
@@ -326,7 +347,7 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <span
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold shrink-0 border uppercase tracking-wider ${
+                        className={`px-2 py-1 rounded-md text-[10px] font-extrabold shrink-0 border uppercase tracking-wider ${
                           isKitchen
                             ? 'bg-amber-100 text-amber-900 border-amber-300'
                             : isBar
@@ -336,14 +357,14 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                       >
                         {m.category || 'Menu'}
                       </span>
-                      <span className="font-bold text-stone-900 text-xs sm:text-sm truncate">
+                      <span className="font-bold text-stone-900 text-sm leading-snug whitespace-normal break-words">
                         {m.name}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2.5 shrink-0">
                       {m.price > 0 && (
-                        <span className="font-mono text-xs font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                        <span className="font-mono text-xs font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200">
                           {formatCurrency(m.price)}
                         </span>
                       )}
@@ -357,6 +378,13 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                 );
               })
             )}
+          </div>
+
+          {/* Footer keyboard hint */}
+          <div className="p-2 bg-stone-50 border-t border-stone-200 text-[11px] text-stone-500 text-center flex items-center justify-center gap-2">
+            <span>Tekan <kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">↑</kbd> <kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">↓</kbd> geser</span>
+            <span>&bull;</span>
+            <span><kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">Enter</kbd> atau <kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">Klik</kbd> pilih</span>
           </div>
         </div>
       )}

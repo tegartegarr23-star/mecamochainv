@@ -248,16 +248,16 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
       {/* Floating Suggestions Dropdown */}
       {isOpen && (
         <div
-          className="absolute left-0 top-full mt-1.5 z-50 bg-white rounded-2xl border border-stone-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 min-w-[320px] sm:min-w-[380px] md:min-w-[440px] max-w-[92vw]"
-          style={{ width: 'max-content' }}
+          className="absolute left-0 top-full mt-1.5 z-50 bg-white rounded-2xl border border-stone-300 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 w-[320px] sm:w-[420px] md:w-[480px] max-w-[95vw]"
+          onMouseDown={(e) => e.stopPropagation()}
         >
           {/* Header Info & Category Pills */}
-          <div className="p-2.5 border-b border-stone-100 bg-stone-50/95 space-y-1.5">
-            <div className="flex items-center justify-between text-[11px] px-1 text-stone-500 font-medium">
-              <span className="flex items-center gap-1 font-semibold text-stone-600">
+          <div className="p-3 border-b border-stone-200 bg-stone-50 space-y-2">
+            <div className="flex items-center justify-between text-xs px-1 text-stone-600 font-medium">
+              <span className="flex items-center gap-1.5 font-bold text-stone-700">
                 <Tag className="w-3.5 h-3.5 text-blue-600" /> Filter Kategori Bahan:
               </span>
-              <span className="text-[10px] font-bold text-stone-400">
+              <span className="text-[11px] font-bold text-stone-500 bg-stone-200/80 px-2 py-0.5 rounded-full">
                 {filteredIngredients.length} bahan (A - Z)
               </span>
             </div>
@@ -265,11 +265,14 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
               <button
                 type="button"
-                onClick={() => setCatFilter('all')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all shrink-0 ${
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setCatFilter('all');
+                }}
+                className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all shrink-0 ${
                   catFilter === 'all'
                     ? 'bg-blue-800 text-white shadow-xs'
-                    : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
+                    : 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-100'
                 }`}
               >
                 Semua ({ingredients.length})
@@ -278,11 +281,14 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
                 <button
                   key={c.id}
                   type="button"
-                  onClick={() => setCatFilter(c.id)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all shrink-0 ${
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setCatFilter(c.id);
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all shrink-0 ${
                     catFilter === c.id
                       ? 'bg-blue-800 text-white shadow-xs'
-                      : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
+                      : 'bg-white text-stone-700 border border-stone-300 hover:bg-stone-100'
                   }`}
                 >
                   {c.name}
@@ -292,14 +298,22 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
           </div>
 
           {/* Results List */}
-          <div ref={listRef} className="max-h-64 overflow-y-auto divide-y divide-stone-100 p-1.5">
+          <div ref={listRef} className="max-h-72 overflow-y-auto divide-y divide-stone-100 p-1.5">
             {filteredIngredients.length === 0 ? (
-              <div className="p-6 text-center text-xs text-stone-400 flex flex-col items-center justify-center gap-1.5">
+              <div className="p-6 text-center text-xs text-stone-400 flex flex-col items-center justify-center gap-2">
                 <Package className="w-6 h-6 text-stone-300" />
                 <p className="font-semibold text-stone-600">Bahan "{inputText}" tidak ditemukan</p>
-                <p className="text-[10px] text-stone-400">
-                  Coba kata kunci lain atau pilih kategori "Semua"
-                </p>
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setInputText('');
+                    setCatFilter('all');
+                  }}
+                  className="px-3 py-1 bg-blue-50 text-blue-800 rounded-lg text-xs font-bold hover:bg-blue-100"
+                >
+                  Tampilkan Semua Bahan
+                </button>
               </div>
             ) : (
               filteredIngredients.map((ing, idx) => {
@@ -313,9 +327,13 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
                     key={ing.id}
                     type="button"
                     data-highlighted={isHighlighted ? 'true' : 'false'}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      handleSelect(ing);
+                    }}
                     onClick={() => handleSelect(ing)}
                     onMouseEnter={() => setHighlightedIndex(idx)}
-                    className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-xs text-left transition-all ${
+                    className={`w-full flex items-center justify-between gap-3 px-3.5 py-3 rounded-xl text-xs text-left transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-blue-100 text-blue-950 font-bold border border-blue-300 shadow-2xs'
                         : isHighlighted
@@ -325,12 +343,14 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       {showCode && (
-                        <span className="px-2 py-0.5 rounded bg-stone-100 text-stone-700 font-mono text-[10px] font-extrabold shrink-0 border border-stone-200">
+                        <span className="px-2 py-1 rounded bg-stone-100 text-stone-700 font-mono text-[10px] font-extrabold shrink-0 border border-stone-200">
                           {ing.code}
                         </span>
                       )}
 
-                      <span className="font-bold text-stone-900 text-xs sm:text-sm truncate">{ing.name}</span>
+                      <span className="font-bold text-stone-900 text-sm leading-snug whitespace-normal break-words">
+                        {ing.name}
+                      </span>
 
                       {cat && (
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-stone-100 text-stone-600 shrink-0 border border-stone-200">
@@ -351,7 +371,7 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
 
                     <div className="flex items-center gap-2.5 shrink-0">
                       {showStock && (
-                        <span className="text-xs font-mono font-bold text-stone-700 bg-stone-50 px-2 py-0.5 rounded-md border border-stone-200">
+                        <span className="text-xs font-mono font-bold text-stone-700 bg-stone-50 px-2.5 py-1 rounded-md border border-stone-200">
                           {formatNumber(ing.current_stock)} {unit?.abbreviation || ''}
                         </span>
                       )}
@@ -368,8 +388,10 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
           </div>
 
           {/* Footer keyboard hint */}
-          <div className="p-2 bg-stone-50 border-t border-stone-100 text-[10px] text-stone-400 text-center">
-            Tekan <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-stone-200 text-stone-600">↑</kbd> <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-stone-200 text-stone-600">↓</kbd> untuk memilih &bull; <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-stone-200 text-stone-600">Enter</kbd> untuk memilih
+          <div className="p-2 bg-stone-50 border-t border-stone-200 text-[11px] text-stone-500 text-center flex items-center justify-center gap-2">
+            <span>Tekan <kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">↑</kbd> <kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">↓</kbd> geser</span>
+            <span>&bull;</span>
+            <span><kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">Enter</kbd> atau <kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">Klik</kbd> pilih</span>
           </div>
         </div>
       )}
