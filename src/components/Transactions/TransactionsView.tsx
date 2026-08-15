@@ -531,9 +531,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
       {/* FORM 1: PRODUKSI MENU / PENJUALAN (PRODUCTION) */}
       {activeTab === 'production' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left: Input Form (1 col) */}
-          <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-4">
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+          {/* Left: Input Form (5 cols on xl) */}
+          <div className="xl:col-span-5 bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-4">
             <div className="flex items-center gap-2.5 pb-3 border-b border-stone-100">
               <div className="p-2.5 rounded-xl bg-amber-100 text-amber-800">
                 <Plus className="w-5 h-5" />
@@ -598,11 +598,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                   {prodItems.map((item, idx) => (
                     <div
                       key={idx}
-                      className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-2"
+                      className="p-3.5 rounded-xl bg-stone-50 border border-stone-200 space-y-2"
                     >
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1">
-                          <label className="block text-[10px] font-semibold text-stone-500 mb-1">Pilih Menu (Ketik/Cari)</label>
+                      <div className="flex items-start gap-2.5">
+                        <div className="flex-1 min-w-0">
+                          <label className="block text-[11px] font-bold text-stone-600 mb-1">
+                            Pilih Menu (Ketik / Cari)
+                          </label>
                           <SearchableMenuSelect
                             menus={menus}
                             value={item.menu_id}
@@ -614,8 +616,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                           />
                         </div>
 
-                        <div className="w-24">
-                          <label className="block text-[10px] font-semibold text-stone-500 mb-1">Porsi</label>
+                        <div className="w-20 shrink-0">
+                          <label className="block text-[11px] font-bold text-stone-600 mb-1">Porsi</label>
                           <input
                             type="number"
                             min="1"
@@ -626,16 +628,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                               next[idx].portion_count = Math.max(1, parseInt(e.target.value) || 1);
                               setProdItems(next);
                             }}
-                            className="w-full px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg bg-white border border-stone-300 focus:outline-none"
+                            className="w-full px-2.5 py-2 text-xs font-mono font-bold rounded-xl bg-white border border-stone-300 focus:outline-none focus:ring-2 focus:ring-amber-500"
                           />
                         </div>
 
-                        <div className="pt-4">
+                        <div className="pt-6 shrink-0">
                           <button
                             type="button"
                             onClick={() => setProdItems(prodItems.filter((_, i) => i !== idx))}
                             disabled={prodItems.length <= 1}
-                            className="p-1.5 text-stone-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-30"
+                            className="p-2 text-stone-400 hover:text-rose-600 rounded-xl hover:bg-rose-50 disabled:opacity-30 transition-colors"
                             title="Hapus menu"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -678,8 +680,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
             </form>
           </div>
 
-          {/* Right: Live Stock Sufficiency Check Table (2 cols) */}
-          <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-4">
+          {/* Right: Live Stock Sufficiency Check Table (7 cols on xl) */}
+          <div className="xl:col-span-7 bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-stone-100">
               <div>
                 <h3 className="font-bold text-stone-900 text-base font-serif flex items-center gap-2">

@@ -235,55 +235,70 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
           disabled={disabled}
           onClick={() => {
             setIsOpen(!isOpen);
-            if (!isOpen) inputRef.current?.focus();
+            if (!isOpen) setTimeout(() => inputRef.current?.focus(), 50);
           }}
-          className="p-0.5 text-stone-400 hover:text-stone-600 shrink-0"
+          className="p-1 text-stone-400 hover:text-stone-700 shrink-0"
         >
           <ChevronDown
-            className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-180 text-amber-600' : ''}`}
+            className={`w-4 h-4 transition-transform duration-200 ${isOpen ? 'rotate-180 text-amber-700' : ''}`}
           />
         </button>
       </div>
 
-      {/* Floating Suggestions List */}
+      {/* Floating Suggestions List with wide and clear dropdown */}
       {isOpen && (
         <div
           ref={listRef}
-          className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white rounded-2xl border border-stone-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+          className="absolute left-0 top-full mt-1.5 z-50 bg-white rounded-2xl border border-stone-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 min-w-[320px] sm:min-w-[380px] md:min-w-[440px] max-w-[92vw]"
+          style={{ width: 'max-content' }}
         >
           {/* Quick Category Filter Pills */}
-          <div className="p-2 border-b border-stone-100 bg-stone-50 flex items-center gap-1 overflow-x-auto no-scrollbar">
-            <button
-              type="button"
-              onClick={() => setCatFilter('all')}
-              className={`px-2.5 py-1 text-[10px] font-bold rounded-lg shrink-0 transition-all ${
-                catFilter === 'all'
-                  ? 'bg-amber-800 text-white shadow-2xs'
-                  : 'bg-white text-stone-600 hover:bg-stone-200 border border-stone-200'
-              }`}
-            >
-              Semua Menu
-            </button>
-            {dynamicCategories.map((cat) => (
+          <div className="p-2.5 border-b border-stone-100 bg-stone-50/95 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] px-1 text-stone-500 font-semibold">
+              <span className="flex items-center gap-1 text-stone-600">
+                <Utensils className="w-3.5 h-3.5 text-amber-700" /> Kategori Menu:
+              </span>
+              <span className="text-[10px] font-bold text-stone-400">
+                {filteredMenus.length} menu (A - Z)
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
               <button
-                key={cat}
                 type="button"
-                onClick={() => setCatFilter(cat)}
-                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg shrink-0 transition-all ${
-                  catFilter === cat
-                    ? 'bg-amber-800 text-white shadow-2xs'
+                onClick={() => setCatFilter('all')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg shrink-0 transition-all ${
+                  catFilter === 'all'
+                    ? 'bg-amber-800 text-white shadow-xs'
                     : 'bg-white text-stone-600 hover:bg-stone-200 border border-stone-200'
                 }`}
               >
-                {cat}
+                Semua ({menus.length})
               </button>
-            ))}
+              {dynamicCategories.map((cat) => {
+                const count = menus.filter((m) => m.category?.toLowerCase() === cat.toLowerCase()).length;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setCatFilter(cat)}
+                    className={`px-2.5 py-1 text-[11px] font-bold rounded-lg shrink-0 transition-all ${
+                      catFilter === cat
+                        ? 'bg-amber-800 text-white shadow-xs'
+                        : 'bg-white text-stone-600 hover:bg-stone-200 border border-stone-200'
+                    }`}
+                  >
+                    {cat} {count > 0 ? `(${count})` : ''}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* List Options (Alphabetical A-Z) */}
-          <div className="max-h-60 overflow-y-auto divide-y divide-stone-50 p-1">
+          {/* List Options (Alphabetical A-Z, wide & clear) */}
+          <div className="max-h-64 overflow-y-auto divide-y divide-stone-100 p-1.5">
             {filteredMenus.length === 0 ? (
-              <div className="p-4 text-center text-xs text-stone-400 font-medium italic">
+              <div className="p-6 text-center text-xs text-stone-400 font-medium italic">
                 Menu "{inputText}" tidak ditemukan
               </div>
             ) : (
@@ -301,17 +316,17 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                     type="button"
                     onClick={() => handleSelect(m)}
                     onMouseEnter={() => setHighlightedIndex(idx)}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between gap-2 transition-all ${
+                    className={`w-full text-left px-3 py-2.5 rounded-xl text-xs flex items-center justify-between gap-3 transition-all ${
                       isSelected
-                        ? 'bg-amber-100 text-amber-900 font-bold'
+                        ? 'bg-amber-100 text-amber-950 font-bold border border-amber-300 shadow-2xs'
                         : isHighlighted
                         ? 'bg-stone-100 text-stone-900 font-semibold'
                         : 'hover:bg-stone-50 text-stone-800'
                     }`}
                   >
-                    <div className="flex items-center gap-2 truncate pr-2">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <span
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 border ${
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold shrink-0 border uppercase tracking-wider ${
                           isKitchen
                             ? 'bg-amber-100 text-amber-900 border-amber-300'
                             : isBar
@@ -319,18 +334,24 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                             : 'bg-stone-100 text-stone-700 border-stone-300'
                         }`}
                       >
-                        {m.category}
+                        {m.category || 'Menu'}
                       </span>
-                      <span className="truncate">{m.name}</span>
+                      <span className="font-bold text-stone-900 text-xs sm:text-sm truncate">
+                        {m.name}
+                      </span>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2.5 shrink-0">
                       {m.price > 0 && (
-                        <span className="font-mono text-[11px] font-bold text-amber-900">
+                        <span className="font-mono text-xs font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
                           {formatCurrency(m.price)}
                         </span>
                       )}
-                      {isSelected && <Check className="w-3.5 h-3.5 text-amber-700 shrink-0" />}
+                      {isSelected ? (
+                        <Check className="w-4 h-4 text-amber-700 shrink-0" />
+                      ) : (
+                        <div className="w-4 h-4" />
+                      )}
                     </div>
                   </button>
                 );
