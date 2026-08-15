@@ -339,6 +339,30 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         ? [newTrx, ...transactions.filter((t) => t.id !== newTrx.id)]
         : transactions);
 
+      // Direct immediate upsert for newTrx if present to guarantee it gets saved to cloud first
+      if (newTrx) {
+        const validSupplier = newTrx.supplier_id && suppliers.some((s) => s.id === newTrx.supplier_id);
+        const validMenu = newTrx.menu_id && menus.some((m) => m.id === newTrx.menu_id);
+        const cleanSingleTrx = {
+          id: String(newTrx.id),
+          type: String(newTrx.type),
+          transaction_date: newTrx.transaction_date || new Date().toISOString(),
+          reference_no: String(newTrx.reference_no || ''),
+          supplier_id: validSupplier ? String(newTrx.supplier_id) : null,
+          menu_id: validMenu ? String(newTrx.menu_id) : null,
+          portion_count: newTrx.portion_count !== undefined && newTrx.portion_count !== null ? Number(newTrx.portion_count) : null,
+          notes: newTrx.notes || null,
+          created_by: newTrx.created_by || null,
+          adjustment_reason: newTrx.adjustment_reason || null,
+          created_at: newTrx.created_at || new Date().toISOString(),
+        };
+        try {
+          await supabase.from('transactions').upsert([cleanSingleTrx]);
+        } catch (e) {
+          console.warn('Immediate single transaction upsert notice:', e);
+        }
+      }
+
       if (allTrxs.length > 0) {
         const cleanTrxs = allTrxs.map((t) => {
           const validSupplier = t.supplier_id && suppliers.some((s) => s.id === t.supplier_id);
@@ -370,6 +394,42 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         ? [...newMovements, ...stockMovements.filter((m) => !newMovements.some((nm) => nm.id === m.id))]
         : stockMovements);
 
+      // Direct immediate upsert for newMovements if present
+      if (newMovements && newMovements.length > 0) {
+        const cleanSingleMovs = newMovements.map((m) => {
+          const foundIng = ingredients.find(
+            (i) =>
+              i.id === m.ingredient_id ||
+              String(i.code).toLowerCase() === String(m.ingredient_id).toLowerCase()
+          );
+          const ingId = foundIng ? String(foundIng.id) : String(m.ingredient_id);
+          let targetTrxId = m.transaction_id;
+          if (!targetTrxId && m.description && allTrxs.length > 0) {
+            const match = allTrxs.find((t) => t.reference_no && m.description?.includes(t.reference_no));
+            if (match) targetTrxId = match.id;
+          }
+          const validTrx = targetTrxId && allTrxs.some((t) => t.id === targetTrxId);
+
+          return {
+            id: String(m.id),
+            transaction_id: validTrx ? String(targetTrxId) : null,
+            ingredient_id: ingId,
+            type: String(m.type),
+            quantity: Number(m.quantity) || 0,
+            balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : null,
+            description: m.description || null,
+            created_at: m.created_at || new Date().toISOString(),
+          };
+        });
+
+        try {
+          const { error: singleMovErr } = await supabase.from('stock_movements').upsert(cleanSingleMovs);
+          if (singleMovErr) {
+            await supabase.from('stock_moved').upsert(cleanSingleMovs);
+          }
+        } catch {}
+      }
+
       if (allMovs.length > 0) {
         const cleanMovements = allMovs.map((m) => {
           const foundIng = ingredients.find(
@@ -397,7 +457,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           };
         });
 
-        const { error: movErr } = await supabase.from('stock_movements').upsert(cleanMovements);
+        let { error: movErr } = await supabase.from('stock_movements').upsert(cleanMovements);
+        if (movErr) {
+          try {
+            const resMoved = await supabase.from('stock_moved').upsert(cleanMovements);
+            if (!resMoved.error) movErr = null;
+          } catch {}
+        }
         if (movErr) {
           console.error('Supabase movements upsert error:', movErr);
           syncErr = `Gagal sync mutasi: ${movErr.message}`;
@@ -927,17 +993,61 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
-  // Auto Sync on Mount & Periodic Polling for Multi-Device Consistency
+  // Auto Sync on Mount, Realtime Subscription & Polling for Multi-Device Consistency
   useEffect(() => {
-    // Pull from Supabase directly on startup so web app matches Supabase
+    // 1. Pull from Supabase directly on startup
     pullFromSupabase();
 
-    // Poll every 12 seconds to ensure changes on other devices sync automatically
+    // 2. Refresh immediately when window tab is focused or visible
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        pullFromSupabase();
+      }
+    };
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    // 3. Poll every 8 seconds for multi-device cross-sync
     const interval = setInterval(() => {
       pullFromSupabase();
-    }, 12000);
+    }, 8000);
 
-    return () => clearInterval(interval);
+    // 4. Realtime subscription to Supabase postgres_changes
+    let channel: any = null;
+    try {
+      const supabase = getSupabase();
+      if (supabase) {
+        channel = supabase
+          .channel('mecamocha-realtime-sync')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
+            pullFromSupabase();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_movements' }, () => {
+            pullFromSupabase();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'ingredients' }, () => {
+            pullFromSupabase();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'menus' }, () => {
+            pullFromSupabase();
+          })
+          .subscribe();
+      }
+    } catch (e) {
+      console.warn('Realtime subscription error:', e);
+    }
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      if (channel) {
+        try {
+          const supabase = getSupabase();
+          if (supabase) supabase.removeChannel(channel);
+        } catch {}
+      }
+    };
   }, []);
 
   // Sync to local storage

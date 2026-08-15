@@ -29,7 +29,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setIsOpenSidebar, onO
   // Calculate critical stock count
   const criticalStockCount = ingredients.filter((i) => i.is_active && i.current_stock <= i.min_stock).length;
 
-  const sqlFixCode = `-- JALANKAN DI SUPABASE SQL EDITOR UNTUK MEMPERBAIKI STRUKTUR TABEL & IZIN (RLS):
+  const sqlFixCode = `-- JALANKAN DI SUPABASE SQL EDITOR UNTUK MEMPERBAIKI STRUKTUR TABEL & IZIN MULTI-DEVICE (RLS):
 
 -- 1. Tambahkan kolom cost_per_unit dan cogs_per_unit di ingredients:
 ALTER TABLE public.ingredients ADD COLUMN IF NOT EXISTS cost_per_unit DOUBLE PRECISION DEFAULT 0;
@@ -38,7 +38,7 @@ ALTER TABLE public.ingredients ADD COLUMN IF NOT EXISTS cogs_per_unit DOUBLE PRE
 -- 2. Tambahkan kolom active_recipe_version di menus:
 ALTER TABLE public.menus ADD COLUMN IF NOT EXISTS active_recipe_version INT DEFAULT 1;
 
--- 3. Matikan RLS agar aplikasi Web dapat simpan/update data:
+-- 3. Matikan Row Level Security (RLS) agar semua laptop/device dapat membaca & menyimpan data secara realtime:
 ALTER TABLE public.ingredients DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stock_movements DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions DISABLE ROW LEVEL SECURITY;
@@ -47,12 +47,26 @@ ALTER TABLE public.recipes DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recipe_details DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.units DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.categories DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.suppliers DISABLE ROW LEVEL SECURITY;`;
+ALTER TABLE public.suppliers DISABLE ROW LEVEL SECURITY;
+
+-- 4. Berikan izin akses penuh ke public/anon role:
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;`;
 
   const handleCopySql = () => {
     navigator.clipboard.writeText(sqlFixCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const [isPulling, setIsPulling] = useState(false);
+  const handleManualPull = async () => {
+    setIsPulling(true);
+    try {
+      await pullFromSupabase();
+    } finally {
+      setTimeout(() => setIsPulling(false), 500);
+    }
   };
 
   const tabTitles: Record<NavTab, { title: string; subtitle: string }> = {
@@ -131,11 +145,29 @@ ALTER TABLE public.suppliers DISABLE ROW LEVEL SECURITY;`;
           </div>
         )}
 
-        {/* Supabase Sync Badge & Button */}
+        {/* Supabase Sync Controls */}
         <div className="flex items-center gap-1.5">
+          {/* Tarik Data Cloud (Pull) Button */}
+          <button
+            onClick={handleManualPull}
+            disabled={isPulling || isSyncing}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-semibold transition-all ${
+              isPulling
+                ? 'bg-blue-50 border-blue-300 text-blue-700 cursor-wait'
+                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50 hover:border-slate-400'
+            }`}
+            title="Tarik data terbaru dari Supabase (Sinkronisasi dari laptop/device lain)"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isPulling ? 'animate-spin text-blue-600' : 'text-slate-600'}`} />
+            <span className="hidden sm:inline font-medium">
+              {isPulling ? 'Menarik Data...' : 'Tarik Cloud'}
+            </span>
+          </button>
+
+          {/* Dorong / Status Cloud (Push & Status) */}
           <button
             onClick={() => pushAllToSupabase()}
-            disabled={isSyncing}
+            disabled={isSyncing || isPulling}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-semibold transition-all ${
               isSyncing
                 ? 'bg-blue-50 border-blue-200 text-blue-700 cursor-wait'
@@ -146,7 +178,7 @@ ALTER TABLE public.suppliers DISABLE ROW LEVEL SECURITY;`;
             title={
               supabaseError
                 ? `Peringatan Sync: ${supabaseError}. Klik untuk dorong ulang data ke Supabase.`
-                : `Supabase Terhubung. Terakhir sync: ${lastSyncedAt ? lastSyncedAt.toLocaleTimeString() : 'Baru saja'}. Klik untuk Sync Manual.`
+                : `Supabase Terhubung. Terakhir sync: ${lastSyncedAt ? lastSyncedAt.toLocaleTimeString() : 'Baru saja'}. Klik untuk Simpan/Dorong ke Cloud.`
             }
           >
             {isSyncing ? (
@@ -155,9 +187,20 @@ ALTER TABLE public.suppliers DISABLE ROW LEVEL SECURITY;`;
               <Cloud className="w-3.5 h-3.5 text-emerald-600" />
             )}
             <span className="hidden md:inline font-medium">
-              {isSyncing ? 'Syncing...' : supabaseError ? 'Sync Error' : 'Supabase Active'}
+              {isSyncing ? 'Syncing...' : supabaseError ? 'Sync Error' : 'Cloud Aktif'}
             </span>
           </button>
+
+          {/* RLS Fix Button if error or for quick access */}
+          {supabaseError && (
+            <button
+              onClick={() => setShowRlsModal(true)}
+              className="px-2 py-1.5 bg-red-100 hover:bg-red-200 text-red-800 border border-red-300 rounded-md text-xs font-bold transition-colors animate-pulse"
+              title="Klik untuk melihat solusi SQL perbaikan izin Supabase"
+            >
+              Fix Izin RLS
+            </button>
+          )}
         </div>
 
         {/* Critical Stock Alert Badge */}
