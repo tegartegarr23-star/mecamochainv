@@ -255,7 +255,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   const [prodRefNo, setProdRefNo] = useState(generateRefNo('PROD'));
   const [prodNotes, setProdNotes] = useState('');
   const [prodItems, setProdItems] = useState<Array<{ menu_id: string; portion_count: number }>>([
-    { menu_id: menus[0]?.id || '', portion_count: 5 },
+    { menu_id: '', portion_count: 1 },
   ]);
   const [prodMessage, setProdMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -349,14 +349,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
     if (menus.length > 0) {
       setProdItems((prev) => {
         if (!prev || prev.length === 0) {
-          return [{ menu_id: menus[0].id, portion_count: 5 }];
+          return [{ menu_id: '', portion_count: 1 }];
         }
-        return prev.map((item) => {
-          if (!item.menu_id || !menus.some((m) => m.id === item.menu_id)) {
-            return { ...item, menu_id: menus[0].id };
-          }
-          return item;
-        });
+        return prev;
       });
     }
   }, [menus]);
@@ -430,7 +425,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
       setProdMessage({ type: 'success', text: res.message });
       setProdRefNo(generateRefNo('PROD'));
       setProdNotes('');
-      setProdItems([{ menu_id: menus[0]?.id || '', portion_count: 5 }]);
+      setProdItems([{ menu_id: '', portion_count: 1 }]);
       setTimeout(() => {
         setProdMessage(null);
         setActiveTab('history');
@@ -480,6 +475,20 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   const getProductionSoldItems = (trx: Transaction, trxMovs: StockMovement[]) => {
     const menuMap = new Map<string, number>();
 
+    // 1. Check direct production_items on Transaction object
+    if (trx.production_items && Array.isArray(trx.production_items) && trx.production_items.length > 0) {
+      for (const item of trx.production_items) {
+        if (!item.menu_id) continue;
+        const menu = menus.find((m) => m.id === item.menu_id || m.name.toLowerCase() === item.menu_id.toLowerCase());
+        const name = menu ? menu.name : item.menu_id;
+        menuMap.set(name, (menuMap.get(name) || 0) + (Number(item.portion_count) || 1));
+      }
+      if (menuMap.size > 0) {
+        return Array.from(menuMap.entries()).map(([name, count]) => ({ name, count }));
+      }
+    }
+
+    // 2. Extract from stock movements descriptions (all movements for this transaction)
     for (const m of trxMovs) {
       if (m.description) {
         const match = m.description.match(/(?:Penjualan|Produksi)\s+([\d.]+)\s+porsi\s+(.+?)(?:\s+\(|$)/i);
@@ -491,22 +500,28 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
       }
     }
 
-    if (menuMap.size === 0) {
-      if (trx.notes) {
-        const notesClean = trx.notes.replace(/^Terjual\s+/i, '').replace(/[\(\)\[\]]/g, '');
-        const parts = notesClean.split(',');
-        for (const part of parts) {
-          const match = part.match(/([\d.]+)\s*porsi\s*(.+)/i) || part.match(/([\d.]+)\s*x\s*(.+)/i);
-          if (match) {
-            menuMap.set(match[2].trim(), parseFloat(match[1]) || 1);
+    // 3. Extract from transaction notes if available
+    if (menuMap.size === 0 && trx.notes) {
+      const matchTerjual = trx.notes.match(/(?:Terjual|Penjualan)\s*:\s*([^)]+)/i) || trx.notes.match(/Terjual\s+([^)]+)/i);
+      const targetStr = matchTerjual ? matchTerjual[1] : trx.notes;
+      const parts = targetStr.split(',');
+      for (const part of parts) {
+        const match = part.match(/([\d.]+)\s*porsi\s*([^(\]]+)/i) || part.match(/([\d.]+)\s*x\s*([^(\]]+)/i);
+        if (match) {
+          const name = match[2].trim();
+          const qty = parseFloat(match[1]) || 1;
+          if (name && !name.toLowerCase().includes('menu item')) {
+            menuMap.set(name, qty);
           }
         }
       }
-      if (menuMap.size === 0 && trx.menu_id) {
-        const menu = menus.find((m) => m.id === trx.menu_id || m.name === trx.menu_id);
-        const name = menu ? menu.name : 'Menu';
-        menuMap.set(name, trx.portion_count || 1);
-      }
+    }
+
+    // 4. Fallback to trx.menu_id
+    if (menuMap.size === 0 && trx.menu_id) {
+      const menu = menus.find((m) => m.id === trx.menu_id || m.name === trx.menu_id);
+      const name = menu ? menu.name : 'Menu';
+      menuMap.set(name, trx.portion_count || 1);
     }
 
     return Array.from(menuMap.entries()).map(([name, count]) => ({
@@ -649,7 +664,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                     onClick={() =>
                       setProdItems([
                         ...prodItems,
-                        { menu_id: menus[0]?.id || '', portion_count: 1 },
+                        { menu_id: '', portion_count: 1 },
                       ])
                     }
                     className="text-xs font-bold text-amber-800 hover:underline flex items-center gap-1 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200"

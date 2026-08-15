@@ -81,8 +81,9 @@ export interface Transaction {
   notes?: string;
   created_by: string; // User name or ID
   supplier_id?: string; // For purchase
-  menu_id?: string; // For production
-  portion_count?: number; // For production
+  menu_id?: string; // For production (primary/legacy)
+  portion_count?: number; // For production (total portions)
+  production_items?: ProductionItemInput[]; // For multi-menu production
   adjustment_reason?: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other'; // For adjustment
   created_at: string;
 }

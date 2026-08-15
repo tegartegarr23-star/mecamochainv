@@ -2265,6 +2265,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       reference_no: actualRefNo,
       menu_id: primaryMenuId,
       portion_count: totalPortions,
+      production_items: items.map((i) => ({ menu_id: i.menu_id, portion_count: i.portion_count })),
       notes: finalNotes,
       created_by: currentUser.name,
       created_at: new Date(now).toISOString(),

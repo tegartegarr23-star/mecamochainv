@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, ChevronDown, Check, X, Utensils, Tag } from 'lucide-react';
+import { Search, ChevronDown, Check, X, Utensils } from 'lucide-react';
 import { Menu } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 
@@ -16,12 +16,12 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
   menus,
   value,
   onChange,
-  placeholder = 'Ketik nama menu di sini...',
+  placeholder = 'Ketik & cari nama menu...',
   className = '',
   disabled = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [inputText, setInputText] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [catFilter, setCatFilter] = useState('all');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
@@ -30,15 +30,8 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
   const listRef = useRef<HTMLDivElement>(null);
 
   const selectedMenu = useMemo(() => {
-    return menus.find((m) => m.id === value);
+    return menus.find((m) => m.id === value || m.name.toLowerCase() === value.toLowerCase());
   }, [menus, value]);
-
-  // Sync input text with selected menu when not actively typing/opened
-  useEffect(() => {
-    if (!isOpen) {
-      setInputText(selectedMenu ? selectedMenu.name : '');
-    }
-  }, [selectedMenu, isOpen]);
 
   // Extract unique categories dynamically from menus
   const dynamicCategories = useMemo(() => {
@@ -48,7 +41,6 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
         cats.add(m.category.trim());
       }
     });
-    // Ensure Kitchen & Bar exist
     cats.add('Kitchen');
     cats.add('Bar');
 
@@ -69,12 +61,12 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
 
   // Filter and sort menus
   const filteredMenus = useMemo(() => {
-    const q = inputText.trim().toLowerCase();
+    const q = searchQuery.trim().toLowerCase();
 
     return menus
       .filter((m) => {
         // Search query filter (matches name or category)
-        if (q && isOpen) {
+        if (q) {
           const matchName = m.name.toLowerCase().includes(q);
           const matchCat = m.category.toLowerCase().includes(q);
           if (!matchName && !matchCat) return false;
@@ -108,10 +100,9 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
         return true;
       })
       .sort((a, b) => {
-        // Sort strictly Alphabetical A-Z by Menu Name
         return a.name.localeCompare(b.name, 'id', { sensitivity: 'base', numeric: true });
       });
-  }, [menus, inputText, isOpen, catFilter]);
+  }, [menus, searchQuery, catFilter]);
 
   // Reset highlight index when filtered list changes
   useEffect(() => {
@@ -123,16 +114,16 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
     const handleClickOutside = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setIsOpen(false);
-        setInputText(selectedMenu ? selectedMenu.name : '');
+        setSearchQuery('');
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [selectedMenu]);
+  }, []);
 
   const handleSelect = (menu: Menu) => {
     onChange(menu.id);
-    setInputText(menu.name);
+    setSearchQuery('');
     setIsOpen(false);
   };
 
@@ -160,90 +151,130 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
       }
     } else if (e.key === 'Escape') {
       setIsOpen(false);
-      setInputText(selectedMenu ? selectedMenu.name : '');
+      setSearchQuery('');
     }
   };
 
   return (
     <div ref={containerRef} className={`relative w-full ${className}`}>
-      {/* Combobox Direct Input Field */}
-      <div
-        className={`flex items-center gap-2 px-3 py-2 text-xs rounded-xl border transition-all bg-white ${
-          disabled
-            ? 'bg-stone-100 border-stone-200 cursor-not-allowed opacity-60'
-            : isOpen
-            ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-sm'
-            : 'border-stone-300 hover:border-amber-400 shadow-2xs'
-        }`}
-      >
-        <Search className="w-3.5 h-3.5 text-stone-400 shrink-0" />
-
-        <input
-          ref={inputRef}
-          type="text"
-          disabled={disabled}
-          value={inputText}
-          placeholder={placeholder}
-          onFocus={() => {
-            setIsOpen(true);
-            // Select text on focus for quick overwrite
-            inputRef.current?.select();
+      {/* If a menu is selected and dropdown is closed, show clear prominent Menu Name Box */}
+      {selectedMenu && !isOpen ? (
+        <div
+          onClick={() => {
+            if (!disabled) {
+              setIsOpen(true);
+              setSearchQuery('');
+              setTimeout(() => inputRef.current?.focus(), 50);
+            }
           }}
-          onChange={(e) => {
-            setInputText(e.target.value);
-            if (!isOpen) setIsOpen(true);
-          }}
-          onKeyDown={handleKeyDown}
-          className="w-full bg-transparent font-bold text-stone-900 placeholder:text-stone-400 placeholder:font-normal focus:outline-none"
-        />
-
-        {/* Selected Category & Price Tag if already chosen */}
-        {selectedMenu && !isOpen && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-sans text-[10px] font-extrabold border border-amber-200">
+          className={`flex items-center justify-between gap-2 px-3 py-2 text-xs rounded-xl border transition-all cursor-pointer bg-white ${
+            disabled
+              ? 'bg-stone-100 border-stone-200 cursor-not-allowed opacity-60'
+              : 'border-amber-300 hover:border-amber-500 hover:bg-amber-50/40 shadow-xs'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+            <span className="font-extrabold text-stone-900 text-sm truncate block">
+              {selectedMenu.name}
+            </span>
+            <span className="text-[10px] text-stone-500 font-semibold bg-stone-100 px-1.5 py-0.5 rounded border border-stone-200 shrink-0">
               {selectedMenu.category}
             </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
             {selectedMenu.price > 0 && (
-              <span className="text-[10px] text-amber-800 font-extrabold font-mono">
+              <span className="text-[11px] font-bold text-amber-900 font-mono bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                 {formatCurrency(selectedMenu.price)}
               </span>
             )}
-          </div>
-        )}
 
-        {/* Clear Button */}
-        {inputText && !disabled && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setInputText('');
-              onChange('');
+            {!disabled && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange('');
+                  setSearchQuery('');
+                  setIsOpen(true);
+                  setTimeout(() => inputRef.current?.focus(), 50);
+                }}
+                className="p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
+                title="Ganti / Hapus Menu"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
+          </div>
+        </div>
+      ) : (
+        /* Active Search / Select Input Box */
+        <div
+          onClick={() => {
+            if (!disabled) {
               setIsOpen(true);
               inputRef.current?.focus();
-            }}
-            className="p-1 text-stone-400 hover:text-stone-600 rounded-md hover:bg-stone-100 shrink-0"
-            title="Hapus / Reset"
-          >
-            <X className="w-3 h-3" />
-          </button>
-        )}
-
-        {/* Dropdown Toggle Chevron */}
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => {
-            setIsOpen(!isOpen);
-            if (!isOpen) setTimeout(() => inputRef.current?.focus(), 50);
+            }
           }}
-          className="p-1 text-stone-400 hover:text-stone-700 shrink-0"
+          className={`flex items-center gap-2 px-3 py-2 text-xs rounded-xl border transition-all bg-white cursor-text ${
+            disabled
+              ? 'bg-stone-100 border-stone-200 cursor-not-allowed opacity-60'
+              : isOpen
+              ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-sm'
+              : 'border-stone-300 hover:border-amber-400 shadow-2xs'
+          }`}
         >
-          <ChevronDown
-            className={`w-4 h-4 transition-transform duration-200 ${isOpen ? 'rotate-180 text-amber-700' : ''}`}
+          <Search className="w-4 h-4 text-stone-400 shrink-0" />
+
+          <input
+            ref={inputRef}
+            type="text"
+            disabled={disabled}
+            value={searchQuery}
+            placeholder={selectedMenu ? `Ganti "${selectedMenu.name}"...` : placeholder}
+            onFocus={() => setIsOpen(true)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              if (!isOpen) setIsOpen(true);
+            }}
+            onKeyDown={handleKeyDown}
+            className="flex-1 min-w-0 bg-transparent font-bold text-stone-900 placeholder:text-stone-400 placeholder:font-normal focus:outline-none text-xs"
           />
-        </button>
-      </div>
+
+          {searchQuery && !disabled && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSearchQuery('');
+                inputRef.current?.focus();
+              }}
+              className="p-1 text-stone-400 hover:text-stone-600 rounded-md hover:bg-stone-100 shrink-0"
+              title="Reset Pencarian"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsOpen(!isOpen);
+              if (!isOpen) setTimeout(() => inputRef.current?.focus(), 50);
+            }}
+            className="p-1 text-stone-400 hover:text-stone-700 shrink-0"
+          >
+            <ChevronDown
+              className={`w-4 h-4 transition-transform duration-200 ${isOpen ? 'rotate-180 text-amber-700' : ''}`}
+            />
+          </button>
+        </div>
+      )}
 
       {/* Floating Suggestions List with wide and clear dropdown */}
       {isOpen && (
@@ -256,10 +287,10 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
           <div className="p-3 border-b border-stone-200 bg-stone-50 space-y-2">
             <div className="flex items-center justify-between text-xs px-1 text-stone-600 font-semibold">
               <span className="flex items-center gap-1.5 text-stone-700 font-bold">
-                <Utensils className="w-3.5 h-3.5 text-amber-700" /> Kategori Menu:
+                <Utensils className="w-3.5 h-3.5 text-amber-700" /> Pilih Kategori:
               </span>
               <span className="text-[11px] font-bold text-stone-500 bg-stone-200/80 px-2 py-0.5 rounded-full">
-                {filteredMenus.length} menu (A - Z)
+                {filteredMenus.length} menu
               </span>
             </div>
 
@@ -270,7 +301,7 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                   e.preventDefault();
                   setCatFilter('all');
                 }}
-                className={`px-3 py-1 text-xs font-bold rounded-lg shrink-0 transition-all ${
+                className={`px-3 py-1 text-xs font-bold rounded-lg shrink-0 transition-all cursor-pointer ${
                   catFilter === 'all'
                     ? 'bg-amber-800 text-white shadow-xs'
                     : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-300'
@@ -288,7 +319,7 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                       e.preventDefault();
                       setCatFilter(cat);
                     }}
-                    className={`px-3 py-1 text-xs font-bold rounded-lg shrink-0 transition-all ${
+                    className={`px-3 py-1 text-xs font-bold rounded-lg shrink-0 transition-all cursor-pointer ${
                       catFilter === cat
                         ? 'bg-amber-800 text-white shadow-xs'
                         : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-300'
@@ -305,15 +336,15 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
           <div className="max-h-72 overflow-y-auto divide-y divide-stone-100 p-1.5">
             {filteredMenus.length === 0 ? (
               <div className="p-6 text-center text-xs text-stone-500 font-medium italic space-y-2">
-                <p>Menu "{inputText}" tidak ditemukan</p>
+                <p>Menu "{searchQuery}" tidak ditemukan</p>
                 <button
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    setInputText('');
+                    setSearchQuery('');
                     setCatFilter('all');
                   }}
-                  className="px-3 py-1 bg-amber-100 text-amber-900 rounded-lg text-xs font-bold hover:bg-amber-200"
+                  className="px-3 py-1 bg-amber-100 text-amber-900 rounded-lg text-xs font-bold hover:bg-amber-200 cursor-pointer"
                 >
                   Tampilkan Semua Menu
                 </button>
@@ -391,3 +422,4 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
     </div>
   );
 };
+
