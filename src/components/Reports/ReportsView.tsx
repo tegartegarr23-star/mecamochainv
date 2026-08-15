@@ -35,6 +35,7 @@ export const ReportsView: React.FC = () => {
   // Daily Report State
   const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
   const [searchFilter, setSearchFilter] = useState('');
+  const [dailyCategoryFilter, setDailyCategoryFilter] = useState<'all' | string>('all');
 
   // Ledger State
   const [selectedIngredientId, setSelectedIngredientId] = useState(ingredients[0]?.id || '');
@@ -50,14 +51,22 @@ export const ReportsView: React.FC = () => {
     setTimeout(() => setIsRefreshing(false), 500);
   };
 
-  const getYYYYMMDD = (input?: string): string => {
-    if (!input) return '';
+  const getYYYYMMDD = (input?: string | Date | null): string => {
+    if (!input) return new Date().toISOString().slice(0, 10);
+    if (typeof input === 'string') {
+      const matchIso = input.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      if (matchIso) {
+        return `${matchIso[1]}-${matchIso[2].padStart(2, '0')}-${matchIso[3].padStart(2, '0')}`;
+      }
+    }
     const d = new Date(input);
-    if (isNaN(d.getTime())) return String(input).slice(0, 10);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    if (!isNaN(d.getTime())) {
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+    return new Date().toISOString().slice(0, 10);
   };
 
   const todayYMD = getYYYYMMDD(new Date().toISOString());
@@ -67,10 +76,54 @@ export const ReportsView: React.FC = () => {
     return getYYYYMMDD(d.toISOString());
   })();
 
-  const dailyReportData = getDailyStockReport(reportDate).filter((row) =>
-    row.ingredient.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
-    row.ingredient.code.toLowerCase().includes(searchFilter.toLowerCase())
-  );
+  // Helper for category sorting priority: Kitchen = 1, Bar = 2, Others = 3
+  const getCategoryPriority = (catName?: string) => {
+    if (!catName) return 3;
+    const lower = catName.toLowerCase();
+    if (lower.includes('kitchen') || lower.includes('dapur')) return 1;
+    if (lower.includes('bar') || lower.includes('minuman')) return 2;
+    return 3;
+  };
+
+  const rawDailyReportData = getDailyStockReport(reportDate);
+
+  const dailyReportData = useMemo(() => {
+    return rawDailyReportData
+      .filter((row) => {
+        // Search filter
+        const matchSearch =
+          row.ingredient.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
+          row.ingredient.code.toLowerCase().includes(searchFilter.toLowerCase());
+        if (!matchSearch) return false;
+
+        // Category filter
+        if (dailyCategoryFilter !== 'all') {
+          const catName = row.category?.name?.toLowerCase() || '';
+          if (dailyCategoryFilter === 'kitchen') {
+            return catName.includes('kitchen') || catName.includes('dapur');
+          }
+          if (dailyCategoryFilter === 'bar') {
+            return catName.includes('bar') || catName.includes('minuman');
+          }
+          return row.category?.id === dailyCategoryFilter || catName.includes(dailyCategoryFilter.toLowerCase());
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        // Priority: Kitchen (1) -> Bar (2) -> Others (3)
+        const pA = getCategoryPriority(a.category?.name);
+        const pB = getCategoryPriority(b.category?.name);
+        if (pA !== pB) return pA - pB;
+
+        // Compare category names first
+        const catCompare = (a.category?.name || '').localeCompare(b.category?.name || '');
+        if (catCompare !== 0) return catCompare;
+
+        // Compare ingredient names A-Z
+        return a.ingredient.name.localeCompare(b.ingredient.name, undefined, { sensitivity: 'base' });
+      });
+  }, [rawDailyReportData, searchFilter, dailyCategoryFilter]);
 
   const selectedIngredient = ingredients.find((i) => i.id === selectedIngredientId) || ingredients[0];
   const selectedUnit = units.find((u) => u.id === selectedIngredient?.unit_id) || ({ name: '-', abbreviation: '-' } as any);
@@ -179,7 +232,7 @@ export const ReportsView: React.FC = () => {
         <div className="space-y-4">
           {/* Controls Bar */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-stone-200 shadow-xs">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2 bg-stone-50 px-3 py-1.5 rounded-xl border border-stone-200">
                 <Calendar className="w-4 h-4 text-stone-500" />
                 <span className="text-xs font-semibold text-stone-700">Tanggal:</span>
@@ -189,6 +242,40 @@ export const ReportsView: React.FC = () => {
                   onChange={(e) => setReportDate(e.target.value)}
                   className="text-xs font-bold text-stone-900 bg-transparent focus:outline-none"
                 />
+              </div>
+
+              {/* Category Filter Pills */}
+              <div className="flex items-center gap-1 bg-stone-50 p-1 rounded-xl border border-stone-200">
+                <button
+                  onClick={() => setDailyCategoryFilter('all')}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                    dailyCategoryFilter === 'all'
+                      ? 'bg-amber-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Semua
+                </button>
+                <button
+                  onClick={() => setDailyCategoryFilter('kitchen')}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                    dailyCategoryFilter === 'kitchen'
+                      ? 'bg-amber-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Kitchen
+                </button>
+                <button
+                  onClick={() => setDailyCategoryFilter('bar')}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                    dailyCategoryFilter === 'bar'
+                      ? 'bg-amber-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Bar
+                </button>
               </div>
 
               <div className="relative flex-1 min-w-48">
@@ -235,6 +322,7 @@ export const ReportsView: React.FC = () => {
                   <tr>
                     <th className="p-3">Kode</th>
                     <th className="p-3">Nama Bahan</th>
+                    <th className="p-3">Kategori</th>
                     <th className="p-3">Satuan</th>
                     <th className="p-3 text-right">Stok Awal</th>
                     <th className="p-3 text-right bg-emerald-50/50 text-emerald-800">In (Beli)</th>
@@ -246,11 +334,29 @@ export const ReportsView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100 font-mono">
-                  {dailyReportData.map((row) => (
-                    <tr key={row.ingredient.id} className="hover:bg-stone-50">
-                      <td className="p-3 font-semibold text-stone-700">{row.ingredient.code}</td>
-                      <td className="p-3 font-sans font-bold text-stone-900">{row.ingredient.name}</td>
-                      <td className="p-3 font-sans text-stone-600">{row.unit?.abbreviation || '-'}</td>
+                  {dailyReportData.map((row) => {
+                    const catName = row.category?.name || '-';
+                    const isKitchen = catName.toLowerCase().includes('kitchen') || catName.toLowerCase().includes('dapur');
+                    const isBar = catName.toLowerCase().includes('bar') || catName.toLowerCase().includes('minuman');
+
+                    return (
+                      <tr key={row.ingredient.id} className="hover:bg-stone-50">
+                        <td className="p-3 font-semibold text-stone-700">{row.ingredient.code}</td>
+                        <td className="p-3 font-sans font-bold text-stone-900">{row.ingredient.name}</td>
+                        <td className="p-3 font-sans">
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                              isKitchen
+                                ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                : isBar
+                                ? 'bg-blue-100 text-blue-900 border-blue-300'
+                                : 'bg-stone-100 text-stone-700 border-stone-300'
+                            }`}
+                          >
+                            {catName}
+                          </span>
+                        </td>
+                        <td className="p-3 font-sans text-stone-600">{row.unit?.abbreviation || '-'}</td>
                       <td className="p-3 text-right font-medium text-stone-600">
                         {formatNumber(row.initial_stock)}
                       </td>
@@ -274,8 +380,9 @@ export const ReportsView: React.FC = () => {
                         {formatNumber(row.final_stock)}
                       </td>
                     </tr>
-                  ))}
-                </tbody>
+                  );
+                })}
+              </tbody>
               </table>
             </div>
           </div>

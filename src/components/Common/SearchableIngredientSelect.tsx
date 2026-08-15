@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Search, ChevronDown, Check, X, Package } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Search, ChevronDown, Check, X, Package, Tag } from 'lucide-react';
 import { Ingredient } from '../../types';
 import { formatNumber } from '../../utils/formatters';
 import { useInventory } from '../../context/InventoryContext';
@@ -20,168 +20,325 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
   ingredients,
   value,
   onChange,
-  placeholder = 'Ketik/Cari bahan baku...',
+  placeholder = 'Ketik nama / kode bahan...',
   className = '',
   showStock = true,
   showCode = true,
   disabled = false,
   filterType = 'all',
 }) => {
-  const { categories } = useInventory();
+  const { categories, units } = useInventory();
   const [isOpen, setIsOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [inputText, setInputText] = useState('');
+  const [catFilter, setCatFilter] = useState('all');
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+
   const containerRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  // Filter ingredients by filterType first
-  const filteredByType = ingredients.filter((ing) => {
-    if (filterType === 'all') return true;
-    return ing.type === filterType;
-  });
+  const selectedIngredient = useMemo(() => {
+    return ingredients.find((i) => i.id === value);
+  }, [ingredients, value]);
 
-  // Filter by user search query
-  const matchingIngredients = filteredByType.filter((ing) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    const matchName = ing.name.toLowerCase().includes(q);
-    const matchCode = ing.code.toLowerCase().includes(q);
-    return matchName || matchCode;
-  });
+  // Sync input text with selected ingredient when closed
+  useEffect(() => {
+    if (!isOpen) {
+      setInputText(selectedIngredient ? selectedIngredient.name : '');
+    }
+  }, [selectedIngredient, isOpen]);
 
-  // Sort alphabetically per category then name
-  const sortedIngredients = [...matchingIngredients].sort((a, b) => {
-    const catA = categories.find((c) => c.id === a.category_id)?.name || '';
-    const catB = categories.find((c) => c.id === b.category_id)?.name || '';
-    const catCompare = catA.localeCompare(catB, 'id', { sensitivity: 'base' });
-    if (catCompare !== 0) return catCompare;
-    return a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
-  });
+  // Available categories based on ingredients in scope
+  const availableCategories = useMemo(() => {
+    const usedCatIds = new Set<string>();
+    ingredients.forEach((ing) => {
+      if (ing.category_id) {
+        usedCatIds.add(ing.category_id);
+      }
+    });
 
-  const selectedIngredient = ingredients.find((ing) => ing.id === value);
+    const list = categories.filter((c) => usedCatIds.has(c.id));
+    return list.sort((a, b) => a.name.localeCompare(b.name, 'id', { sensitivity: 'base' }));
+  }, [ingredients, categories]);
 
-  // Close dropdown on outside click
+  // Filter and sort ingredients strictly
+  const filteredIngredients = useMemo(() => {
+    const q = inputText.trim().toLowerCase();
+
+    return ingredients
+      .filter((ing) => {
+        // Filter by type (raw vs prepared)
+        if (filterType !== 'all' && ing.type !== filterType) {
+          return false;
+        }
+
+        // Search query filter (matches name or code or category name)
+        if (q && isOpen) {
+          const matchName = ing.name.toLowerCase().includes(q);
+          const matchCode = (ing.code || '').toLowerCase().includes(q);
+          const cat = categories.find((c) => c.id === ing.category_id);
+          const matchCat = cat ? cat.name.toLowerCase().includes(q) : false;
+
+          if (!matchName && !matchCode && !matchCat) return false;
+        }
+
+        // Category pill filter
+        if (catFilter !== 'all' && ing.category_id !== catFilter) {
+          return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        // Sort strictly Alphabetical A-Z by Ingredient Name
+        return a.name.localeCompare(b.name, 'id', { sensitivity: 'base', numeric: true });
+      });
+  }, [ingredients, inputText, isOpen, catFilter, filterType, categories]);
+
+  // Reset highlight index when filtered list changes
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [filteredIngredients]);
+
+  // Close dropdown on click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setIsOpen(false);
+        setInputText(selectedIngredient ? selectedIngredient.name : '');
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [selectedIngredient]);
 
-  // Auto focus search input when opened
-  useEffect(() => {
-    if (isOpen && searchInputRef.current) {
-      searchInputRef.current.focus();
-    }
-  }, [isOpen]);
-
-  const handleSelect = (id: string) => {
-    onChange(id);
+  const handleSelect = (ing: Ingredient) => {
+    onChange(ing.id);
+    setInputText(ing.name);
     setIsOpen(false);
-    setSearchQuery('');
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return;
+
+    if (!isOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') {
+        setIsOpen(true);
+        e.preventDefault();
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => (prev < filteredIngredients.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : filteredIngredients.length - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filteredIngredients[highlightedIndex]) {
+        handleSelect(filteredIngredients[highlightedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setIsOpen(false);
+      setInputText(selectedIngredient ? selectedIngredient.name : '');
+    }
+  };
+
+  // Scroll active item into view
+  useEffect(() => {
+    if (isOpen && listRef.current) {
+      const activeEl = listRef.current.querySelector('[data-highlighted="true"]');
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [highlightedIndex, isOpen]);
+
   return (
-    <div ref={containerRef} className={`relative min-w-[200px] ${className}`}>
-      {/* Selected Box / Trigger Button */}
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-bold rounded-xl border transition-all text-left ${
+    <div ref={containerRef} className={`relative ${className}`}>
+      {/* Combobox Input Box */}
+      <div
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all bg-white ${
           disabled
-            ? 'bg-stone-100 text-stone-400 border-stone-200 cursor-not-allowed'
+            ? 'bg-stone-100 text-stone-400 border-stone-200 cursor-not-allowed opacity-60'
             : isOpen
-            ? 'bg-white text-stone-900 border-amber-500 ring-2 ring-amber-500/20 shadow-xs'
-            : 'bg-white text-stone-800 border-stone-200 hover:border-amber-400 hover:bg-stone-50/80 shadow-2xs'
+            ? 'border-blue-600 ring-2 ring-blue-500/20 shadow-xs'
+            : 'border-stone-300 hover:border-stone-400 focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-500/20 shadow-2xs'
         }`}
       >
-        <div className="flex items-center gap-2 truncate pr-1">
-          {selectedIngredient ? (
-            <>
-              {showCode && (
-                <span className="px-1.5 py-0.5 rounded bg-stone-100 text-stone-700 font-mono text-[10px] font-extrabold shrink-0 border border-stone-200">
-                  {selectedIngredient.code}
-                </span>
-              )}
-              <span className="truncate font-bold text-stone-900">{selectedIngredient.name}</span>
-              {showStock && (
-                <span className="text-[10px] text-stone-500 font-normal shrink-0">
-                  ({formatNumber(selectedIngredient.current_stock)})
-                </span>
-              )}
-            </>
-          ) : (
-            <span className="text-stone-400 font-normal">{placeholder}</span>
-          )}
-        </div>
-        <ChevronDown className={`w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform ${isOpen ? 'rotate-180 text-amber-600' : ''}`} />
-      </button>
+        <Search className="w-3.5 h-3.5 text-stone-400 shrink-0" />
 
-      {/* Dropdown Menu */}
+        {/* Selected Code Badge */}
+        {showCode && selectedIngredient && !isOpen && (
+          <span className="px-1.5 py-0.5 rounded bg-stone-100 text-stone-700 font-mono text-[10px] font-extrabold shrink-0 border border-stone-200">
+            {selectedIngredient.code}
+          </span>
+        )}
+
+        <input
+          ref={inputRef}
+          type="text"
+          disabled={disabled}
+          value={inputText}
+          onChange={(e) => {
+            setInputText(e.target.value);
+            if (!isOpen) setIsOpen(true);
+          }}
+          onFocus={() => {
+            if (!disabled) {
+              setIsOpen(true);
+              if (selectedIngredient && inputText === selectedIngredient.name) {
+                inputRef.current?.select();
+              }
+            }
+          }}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          className="w-full bg-transparent text-xs font-semibold text-stone-900 placeholder:text-stone-400 focus:outline-none truncate"
+        />
+
+        {/* Selected Stock pill */}
+        {showStock && selectedIngredient && !isOpen && (
+          <span className="text-[10px] text-stone-500 font-mono font-bold shrink-0 bg-stone-50 px-1.5 py-0.5 rounded border border-stone-200">
+            {formatNumber(selectedIngredient.current_stock)}{' '}
+            {units.find((u) => u.id === selectedIngredient.unit_id)?.abbreviation || ''}
+          </span>
+        )}
+
+        {/* Clear Button */}
+        {inputText && !disabled && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setInputText('');
+              onChange('');
+              inputRef.current?.focus();
+              setIsOpen(true);
+            }}
+            className="p-1 text-stone-400 hover:text-stone-600 rounded-md hover:bg-stone-100 shrink-0"
+            title="Hapus pencarian"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        )}
+
+        {/* Dropdown Toggle Arrow */}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            if (!isOpen) {
+              inputRef.current?.focus();
+            }
+            setIsOpen(!isOpen);
+          }}
+          className="p-1 text-stone-400 hover:text-stone-700 rounded-md shrink-0"
+        >
+          <ChevronDown
+            className={`w-3.5 h-3.5 transition-transform duration-150 ${
+              isOpen ? 'rotate-180 text-blue-600' : ''
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* Floating Suggestions Dropdown */}
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white rounded-2xl border border-stone-200 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          {/* Search Bar Input */}
-          <div className="p-2 border-b border-stone-100 bg-stone-50/80 flex items-center gap-2">
-            <Search className="w-3.5 h-3.5 text-stone-400 shrink-0 ml-1.5" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Ketik nama atau kode (cth: MM001 / Air)..."
-              className="w-full bg-transparent text-xs font-bold text-stone-900 placeholder:text-stone-400 placeholder:font-normal focus:outline-none py-1"
-            />
-            {searchQuery && (
+        <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white rounded-2xl border border-stone-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 min-w-[280px]">
+          {/* Header Info & Category Pills */}
+          <div className="p-2 border-b border-stone-100 bg-stone-50/90 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] px-1 text-stone-500 font-medium">
+              <span className="flex items-center gap-1">
+                <Tag className="w-3 h-3 text-stone-400" /> Filter Kategori Bahan:
+              </span>
+              <span className="text-[10px] font-bold text-stone-400">
+                {filteredIngredients.length} bahan (Urut A-Z)
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 overflow-x-auto pb-1 no-scrollbar">
               <button
                 type="button"
-                onClick={() => setSearchQuery('')}
-                className="p-1 text-stone-400 hover:text-stone-600 rounded-lg hover:bg-stone-200/60"
+                onClick={() => setCatFilter('all')}
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap transition-all shrink-0 ${
+                  catFilter === 'all'
+                    ? 'bg-blue-800 text-white shadow-xs'
+                    : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
+                }`}
               >
-                <X className="w-3 h-3" />
+                Semua
               </button>
-            )}
+              {availableCategories.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setCatFilter(c.id)}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap transition-all shrink-0 ${
+                    catFilter === c.id
+                      ? 'bg-blue-800 text-white shadow-xs'
+                      : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
+                  }`}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* List Items */}
-          <div className="max-h-60 overflow-y-auto divide-y divide-stone-50 p-1">
-            {sortedIngredients.length === 0 ? (
-              <div className="p-4 text-center text-xs text-stone-400 flex flex-col items-center justify-center gap-1">
+          {/* Results List */}
+          <div ref={listRef} className="max-h-56 overflow-y-auto divide-y divide-stone-50 p-1">
+            {filteredIngredients.length === 0 ? (
+              <div className="p-4 text-center text-xs text-stone-400 flex flex-col items-center justify-center gap-1.5">
                 <Package className="w-6 h-6 text-stone-300" />
-                <span>Bahan "{searchQuery}" tidak ditemukan</span>
+                <p className="font-semibold text-stone-600">Bahan tidak ditemukan</p>
+                <p className="text-[10px] text-stone-400">
+                  Coba kata kunci lain atau pilih kategori "Semua"
+                </p>
               </div>
             ) : (
-              sortedIngredients.map((ing) => {
+              filteredIngredients.map((ing, idx) => {
                 const isSelected = ing.id === value;
-                const catName = categories.find((c) => c.id === ing.category_id)?.name;
+                const isHighlighted = idx === highlightedIndex;
+                const cat = categories.find((c) => c.id === ing.category_id);
+                const unit = units.find((u) => u.id === ing.unit_id);
 
                 return (
                   <button
                     key={ing.id}
                     type="button"
-                    onClick={() => handleSelect(ing.id)}
+                    data-highlighted={isHighlighted ? 'true' : 'false'}
+                    onClick={() => handleSelect(ing)}
+                    onMouseEnter={() => setHighlightedIndex(idx)}
                     className={`w-full flex items-center justify-between gap-2 p-2 rounded-xl text-xs text-left transition-colors ${
                       isSelected
-                        ? 'bg-amber-50/90 text-amber-950 font-bold border border-amber-200/80'
-                        : 'hover:bg-stone-100/80 text-stone-800'
+                        ? 'bg-blue-50 text-blue-950 font-bold border border-blue-200'
+                        : isHighlighted
+                        ? 'bg-stone-100 text-stone-900'
+                        : 'hover:bg-stone-50 text-stone-800'
                     }`}
                   >
-                    <div className="flex items-center gap-2 truncate pr-2">
-                      <span className="px-1.5 py-0.5 rounded bg-stone-100 text-stone-800 font-mono text-[10px] font-extrabold shrink-0 border border-stone-200/60">
-                        {ing.code}
-                      </span>
-                      <span className="truncate font-semibold">{ing.name}</span>
-                      {catName && (
-                        <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-stone-100 text-stone-600 shrink-0 border border-stone-200/40">
-                          {catName}
+                    <div className="flex items-center gap-2 truncate pr-1">
+                      {showCode && (
+                        <span className="px-1.5 py-0.5 rounded bg-stone-100 text-stone-700 font-mono text-[10px] font-extrabold shrink-0 border border-stone-200">
+                          {ing.code}
                         </span>
                       )}
+
+                      <span className="truncate font-bold text-stone-900">{ing.name}</span>
+
+                      {cat && (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-stone-100 text-stone-600 shrink-0 border border-stone-200">
+                          {cat.name}
+                        </span>
+                      )}
+
                       <span
                         className={`px-1.5 py-0.2 rounded text-[9px] font-bold shrink-0 ${
                           ing.type === 'prepared'
-                            ? 'bg-amber-100 text-amber-900'
+                            ? 'bg-blue-100 text-blue-900'
                             : 'bg-stone-100 text-stone-600'
                         }`}
                       >
@@ -191,16 +348,21 @@ export const SearchableIngredientSelect: React.FC<SearchableIngredientSelectProp
 
                     <div className="flex items-center gap-2 shrink-0">
                       {showStock && (
-                        <span className="text-[10px] font-mono font-bold text-stone-500">
-                          {formatNumber(ing.current_stock)}
+                        <span className="text-[10px] font-mono font-bold text-stone-600 bg-stone-50 px-1.5 py-0.5 rounded border border-stone-200">
+                          {formatNumber(ing.current_stock)} {unit?.abbreviation || ''}
                         </span>
                       )}
-                      {isSelected && <Check className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
+                      {isSelected && <Check className="w-3.5 h-3.5 text-blue-700 shrink-0" />}
                     </div>
                   </button>
                 );
               })
             )}
+          </div>
+
+          {/* Footer keyboard hint */}
+          <div className="p-1.5 bg-stone-50 border-t border-stone-100 text-[10px] text-stone-400 text-center">
+            Tekan <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-stone-200 text-stone-600">↑</kbd> <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-stone-200 text-stone-600">↓</kbd> untuk memilih &bull; <kbd className="font-mono bg-white px-1 py-0.5 rounded border border-stone-200 text-stone-600">Enter</kbd> untuk memilih
           </div>
         </div>
       )}

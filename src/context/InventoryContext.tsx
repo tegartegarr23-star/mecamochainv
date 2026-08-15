@@ -250,7 +250,25 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (item && item[key]) map.set(item[key], item);
     });
     remoteList.forEach((item) => {
-      if (item && item[key]) map.set(item[key], item);
+      if (item && item[key]) {
+        const localItem = map.get(item[key]);
+        if (localItem) {
+          const mergedItem = { ...localItem, ...item };
+          // If remote field is empty or null, but local has non-empty field, keep local!
+          if (!item['category_id' as keyof T] && localItem['category_id' as keyof T]) {
+            mergedItem['category_id' as keyof T] = localItem['category_id' as keyof T];
+          }
+          if (!item['unit_id' as keyof T] && localItem['unit_id' as keyof T]) {
+            mergedItem['unit_id' as keyof T] = localItem['unit_id' as keyof T];
+          }
+          if (!item['transaction_id' as keyof T] && localItem['transaction_id' as keyof T]) {
+            mergedItem['transaction_id' as keyof T] = localItem['transaction_id' as keyof T];
+          }
+          map.set(item[key], mergedItem);
+        } else {
+          map.set(item[key], item);
+        }
+      }
     });
     return Array.from(map.values());
   };
@@ -271,12 +289,29 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       // 1. Sync ingredients
       if (changedIngredients && changedIngredients.length > 0) {
+        // Ensure all categories and units exist in Supabase first so Foreign Key never rejects
+        if (categories && categories.length > 0) {
+          const cleanCats = categories.map((c) => ({
+            id: String(c.id),
+            name: String(c.name || ''),
+          }));
+          try { await supabase.from('categories').upsert(cleanCats); } catch {}
+        }
+        if (units && units.length > 0) {
+          const cleanUnits = units.map((u) => ({
+            id: String(u.id),
+            name: String(u.name || ''),
+            abbreviation: String(u.abbreviation || ''),
+          }));
+          try { await supabase.from('units').upsert(cleanUnits); } catch {}
+        }
+
         const cleanIngredients = changedIngredients.map((ing) => ({
           id: String(ing.id),
           code: String(ing.code || ''),
           name: String(ing.name || ''),
-          category_id: ing.category_id && categories.some((c) => c.id === ing.category_id) ? String(ing.category_id) : null,
-          unit_id: ing.unit_id && units.some((u) => u.id === ing.unit_id) ? String(ing.unit_id) : null,
+          category_id: ing.category_id ? String(ing.category_id) : null,
+          unit_id: ing.unit_id ? String(ing.unit_id) : null,
           type: ing.type || 'raw',
           min_stock: Number(ing.min_stock) || 0,
           current_stock: Number(ing.current_stock) || 0,
@@ -432,9 +467,27 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (sbStockMoved && sbStockMoved.length > 0) stockMovementsData = sbStockMoved;
       }
 
-      if (sbUnits && sbUnits.length > 0) setUnits((prev) => mergeByField(prev, sbUnits, 'id'));
-      if (sbCategories && sbCategories.length > 0) setCategories((prev) => mergeByField(prev, sbCategories, 'id'));
-      if (sbSuppliers && sbSuppliers.length > 0) setSuppliers((prev) => mergeByField(prev, sbSuppliers, 'id'));
+      if (sbUnits && sbUnits.length > 0) {
+        setUnits((prev) => {
+          const merged = mergeByField(prev, sbUnits, 'id');
+          saveToStorage(STORAGE_KEYS.UNITS, merged);
+          return merged;
+        });
+      }
+      if (sbCategories && sbCategories.length > 0) {
+        setCategories((prev) => {
+          const merged = mergeByField(prev, sbCategories, 'id');
+          saveToStorage(STORAGE_KEYS.CATEGORIES, merged);
+          return merged;
+        });
+      }
+      if (sbSuppliers && sbSuppliers.length > 0) {
+        setSuppliers((prev) => {
+          const merged = mergeByField(prev, sbSuppliers, 'id');
+          saveToStorage(STORAGE_KEYS.SUPPLIERS, merged);
+          return merged;
+        });
+      }
       if (sbMenus && sbMenus.length > 0) {
         const isMenuDeleted = (m: Menu) => {
           const idStr = String(m.id).trim().toLowerCase();
@@ -448,7 +501,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           return merged;
         });
       }
-      if (sbRecipes && sbRecipes.length > 0) setRecipes((prev) => mergeByField(prev, sbRecipes, 'id'));
+      if (sbRecipes && sbRecipes.length > 0) {
+        setRecipes((prev) => {
+          const merged = mergeByField(prev, sbRecipes, 'id');
+          saveToStorage(STORAGE_KEYS.RECIPES, merged);
+          return merged;
+        });
+      }
       if (recipeDetailsData && recipeDetailsData.length > 0) {
         setRecipeDetails((prev) => {
           const baseDetails = mergeByField(INITIAL_RECIPE_DETAILS, prev, 'id');
@@ -692,8 +751,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         id: String(ing.id),
         code: String(ing.code || ''),
         name: String(ing.name || ''),
-        category_id: ing.category_id && categories.some((c) => c.id === ing.category_id) ? String(ing.category_id) : null,
-        unit_id: ing.unit_id && units.some((u) => u.id === ing.unit_id) ? String(ing.unit_id) : null,
+        category_id: ing.category_id ? String(ing.category_id) : null,
+        unit_id: ing.unit_id ? String(ing.unit_id) : null,
         type: ing.type || 'raw',
         min_stock: Number(ing.min_stock) || 0,
         current_stock: getIngredientCurrentStock(ing, stockMovements),
@@ -917,7 +976,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Master Data Handlers
   const addUnit = async (unit: Omit<Unit, 'id'>) => {
     const newUnit = { id: `u-${Date.now()}`, ...unit };
-    setUnits((prev) => [...prev, newUnit]);
+    setUnits((prev) => {
+      const next = [...prev, newUnit];
+      saveToStorage(STORAGE_KEYS.UNITS, next);
+      return next;
+    });
     try {
       const supabase = getSupabase();
       if (supabase) {
@@ -930,7 +993,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const updateUnit = async (id: string, unit: Omit<Unit, 'id'>) => {
     const updated = { id, ...unit };
-    setUnits((prev) => prev.map((u) => (u.id === id ? updated : u)));
+    setUnits((prev) => {
+      const next = prev.map((u) => (u.id === id ? updated : u));
+      saveToStorage(STORAGE_KEYS.UNITS, next);
+      return next;
+    });
     try {
       const supabase = getSupabase();
       if (supabase) {
@@ -942,7 +1009,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteUnit = async (id: string) => {
-    setUnits((prev) => prev.filter((u) => u.id !== id));
+    setUnits((prev) => {
+      const next = prev.filter((u) => u.id !== id);
+      saveToStorage(STORAGE_KEYS.UNITS, next);
+      return next;
+    });
     try {
       const supabase = getSupabase();
       if (supabase) {
@@ -955,7 +1026,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const addCategory = async (cat: Omit<Category, 'id'>) => {
     const newCat = { id: `c-${Date.now()}`, ...cat };
-    setCategories((prev) => [...prev, newCat]);
+    setCategories((prev) => {
+      const next = [...prev, newCat];
+      saveToStorage(STORAGE_KEYS.CATEGORIES, next);
+      return next;
+    });
     try {
       const supabase = getSupabase();
       if (supabase) {
@@ -968,7 +1043,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const updateCategory = async (id: string, cat: Omit<Category, 'id'>) => {
     const updated = { id, ...cat };
-    setCategories((prev) => prev.map((c) => (c.id === id ? updated : c)));
+    setCategories((prev) => {
+      const next = prev.map((c) => (c.id === id ? updated : c));
+      saveToStorage(STORAGE_KEYS.CATEGORIES, next);
+      return next;
+    });
     try {
       const supabase = getSupabase();
       if (supabase) {
@@ -980,7 +1059,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteCategory = async (id: string) => {
-    setCategories((prev) => prev.filter((c) => c.id !== id));
+    setCategories((prev) => {
+      const next = prev.filter((c) => c.id !== id);
+      saveToStorage(STORAGE_KEYS.CATEGORIES, next);
+      return next;
+    });
     try {
       const supabase = getSupabase();
       if (supabase) {
@@ -993,7 +1076,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const addSupplier = async (sup: Omit<Supplier, 'id'>) => {
     const newSup = { id: `s-${Date.now()}`, ...sup };
-    setSuppliers((prev) => [...prev, newSup]);
+    setSuppliers((prev) => {
+      const next = [...prev, newSup];
+      saveToStorage(STORAGE_KEYS.SUPPLIERS, next);
+      return next;
+    });
     try {
       const supabase = getSupabase();
       if (supabase) {
@@ -1011,7 +1098,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const updateSupplier = async (id: string, sup: Omit<Supplier, 'id'>) => {
     const updated = { id, ...sup };
-    setSuppliers((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    setSuppliers((prev) => {
+      const next = prev.map((s) => (s.id === id ? updated : s));
+      saveToStorage(STORAGE_KEYS.SUPPLIERS, next);
+      return next;
+    });
     try {
       const supabase = getSupabase();
       if (supabase) {
@@ -1028,7 +1119,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteSupplier = async (id: string) => {
-    setSuppliers((prev) => prev.filter((s) => s.id !== id));
+    setSuppliers((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      saveToStorage(STORAGE_KEYS.SUPPLIERS, next);
+      return next;
+    });
     try {
       const supabase = getSupabase();
       if (supabase) {
@@ -1054,7 +1149,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       cost_per_unit: ingData.cost_per_unit || 0,
     };
 
-    setIngredients((prev) => [...prev, newIng]);
+    setIngredients((prev) => {
+      const next = [...prev, newIng];
+      saveToStorage(STORAGE_KEYS.INGREDIENTS, next);
+      return next;
+    });
 
     let initTrx: Transaction | undefined;
     let initMov: StockMovement | undefined;
@@ -1140,7 +1239,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     });
 
-    setIngredients((prev) => [...prev, ...newIngs]);
+    setIngredients((prev) => {
+      const next = [...prev, ...newIngs];
+      saveToStorage(STORAGE_KEYS.INGREDIENTS, next);
+      return next;
+    });
     if (newTrxs.length > 0) setTransactions((prev) => [...newTrxs, ...prev]);
     if (newMovs.length > 0) setStockMovements((prev) => [...newMovs, ...prev]);
 
@@ -1149,17 +1252,46 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const updateIngredient = (id: string, ing: Partial<Ingredient>) => {
     let updatedItem: Ingredient | undefined;
-    setIngredients((prev) =>
-      prev.map((item) => {
+    setIngredients((prev) => {
+      const next = prev.map((item) => {
         if (item.id === id) {
           updatedItem = { ...item, ...ing };
           return updatedItem;
         }
         return item;
-      })
-    );
+      });
+      saveToStorage(STORAGE_KEYS.INGREDIENTS, next);
+      return next;
+    });
+
     if (updatedItem) {
       syncDataToSupabase([updatedItem]);
+
+      // Direct explicit Supabase update to guarantee category_id and other fields are saved
+      try {
+        const supabase = getSupabase();
+        if (supabase) {
+          supabase
+            .from('ingredients')
+            .update({
+              name: String(updatedItem.name || ''),
+              code: String(updatedItem.code || ''),
+              category_id: updatedItem.category_id ? String(updatedItem.category_id) : null,
+              unit_id: updatedItem.unit_id ? String(updatedItem.unit_id) : null,
+              type: updatedItem.type || 'raw',
+              min_stock: Number(updatedItem.min_stock) || 0,
+              cost_per_unit: Number(updatedItem.cost_per_unit) || 0,
+              cogs_per_unit: Number(updatedItem.cost_per_unit) || 0,
+              is_active: updatedItem.is_active !== false,
+            })
+            .eq('id', String(id))
+            .then(({ error }) => {
+              if (error) console.warn('Direct update ingredient supabase error:', error);
+            });
+        }
+      } catch (err) {
+        console.warn('Direct update ingredient error:', err);
+      }
     }
   };
 
@@ -2090,8 +2222,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       updatedIngredients[ingIndex] = { ...ing, current_stock: newStock };
 
       const itemDesc = item.mode === 'set'
-        ? `Stock Opname: ${currentStock} -> ${newStock} (${item.item_notes || reason})`
-        : `Penyesuaian Stok (${moveType === 'in' ? '+' : '-'}) Alasan: ${reason} - ${item.item_notes || notes}`;
+        ? `Stock Opname: ${currentStock} -> ${newStock} (${item.item_notes || reason}) (${refNo})`
+        : `Penyesuaian Stok (${moveType === 'in' ? '+' : '-'}) Alasan: ${reason} - ${item.item_notes || notes} (${refNo})`;
 
       newMovements.push({
         id: `mov-${now}-${index}`,
@@ -2344,14 +2476,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!input) return new Date().toISOString().slice(0, 10);
       if (typeof input === 'string') {
         const trimmed = input.trim();
-        const matchIso = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+        const matchIso = trimmed.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
         if (matchIso) {
           const y = matchIso[1];
           const m = matchIso[2].padStart(2, '0');
           const d = matchIso[3].padStart(2, '0');
           return `${y}-${m}-${d}`;
         }
-        const matchId = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+        const matchId = trimmed.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
         if (matchId) {
           const d = matchId[1].padStart(2, '0');
           const m = matchId[2].padStart(2, '0');
@@ -2378,20 +2510,45 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       const liveStock = getIngredientCurrentStock(ing, stockMovements);
 
+      const ingId = String(ing.id || '').trim().toLowerCase();
+      const ingCode = String(ing.code || '').trim().toLowerCase();
+
+      const getMovementDate = (m: StockMovement): string => {
+        const trx = transactions.find((t) => {
+          if (!t) return false;
+          if (m.transaction_id && String(t.id).trim().toLowerCase() === String(m.transaction_id).trim().toLowerCase()) {
+            return true;
+          }
+          if (t.reference_no && m.description && String(m.description).toLowerCase().includes(String(t.reference_no).toLowerCase())) {
+            return true;
+          }
+          return false;
+        });
+
+        if (trx?.transaction_date) {
+          return getYYYYMMDD(trx.transaction_date);
+        }
+        if (trx?.created_at) {
+          return getYYYYMMDD(trx.created_at);
+        }
+        if (m.description) {
+          const matchRefDate = String(m.description).match(/(?:PUR|PREP|PROD|ADJ)-(\d{4})(\d{2})(\d{2})/i);
+          if (matchRefDate) {
+            return `${matchRefDate[1]}-${matchRefDate[2]}-${matchRefDate[3]}`;
+          }
+        }
+        return getYYYYMMDD(m.created_at);
+      };
+
       // Movements on targetDate or all dates
       const movementsToday = stockMovements.filter((m) => {
         if (!m || !m.ingredient_id) return false;
-        const mId = String(m.ingredient_id).trim().toLowerCase();
-        const ingId = String(ing.id).trim().toLowerCase();
-        const ingCode = String(ing.code || '').trim().toLowerCase();
-        if (mId !== ingId && mId !== ingCode) return false;
+        const mIngId = (typeof m.ingredient_id === 'object' && m.ingredient_id !== null ? String((m.ingredient_id as any).id || '') : String(m.ingredient_id || '')).trim().toLowerCase();
+        if (mIngId !== ingId && mIngId !== ingCode) return false;
 
         if (isAllDates) return true;
 
-        const trx = transactions.find(
-          (t) => t.id === m.transaction_id || (t.reference_no && m.description && m.description.includes(t.reference_no))
-        );
-        const mDate = getYYYYMMDD(trx?.transaction_date || m.created_at);
+        const mDate = getMovementDate(m);
         return mDate === targetDate;
       });
 
@@ -2400,15 +2557,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         ? []
         : stockMovements.filter((m) => {
             if (!m || !m.ingredient_id) return false;
-            const mId = String(m.ingredient_id).trim().toLowerCase();
-            const ingId = String(ing.id).trim().toLowerCase();
-            const ingCode = String(ing.code || '').trim().toLowerCase();
-            if (mId !== ingId && mId !== ingCode) return false;
+            const mIngId = (typeof m.ingredient_id === 'object' && m.ingredient_id !== null ? String((m.ingredient_id as any).id || '') : String(m.ingredient_id || '')).trim().toLowerCase();
+            if (mIngId !== ingId && mIngId !== ingCode) return false;
 
-            const trx = transactions.find(
-              (t) => t.id === m.transaction_id || (t.reference_no && m.description && m.description.includes(t.reference_no))
-            );
-            const mDate = getYYYYMMDD(trx?.transaction_date || m.created_at);
+            const mDate = getMovementDate(m);
             return mDate > targetDate;
           });
 
@@ -2420,11 +2572,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       let out_adjustment = 0;
 
       movementsToday.forEach((m) => {
-        const trx = transactions.find(
-          (t) => t.id === m.transaction_id || (t.reference_no && m.description && m.description.includes(t.reference_no))
-        );
-        const descLower = m.description ? m.description.toLowerCase() : '';
+        const trx = transactions.find((t) => {
+          if (!t) return false;
+          if (m.transaction_id && String(t.id).trim().toLowerCase() === String(m.transaction_id).trim().toLowerCase()) {
+            return true;
+          }
+          if (t.reference_no && m.description && String(m.description).toLowerCase().includes(String(t.reference_no).toLowerCase())) {
+            return true;
+          }
+          return false;
+        });
+
+        const descLower = m.description ? String(m.description).toLowerCase() : '';
         const trxType = trx?.type ? String(trx.type).toLowerCase() : '';
+        const mType = String(m.type || '').trim().toLowerCase();
 
         const isPurchase = trxType === 'purchase' || descLower.includes('pembelian') || descLower.includes('beli') || descLower.includes('pur');
         const isPrepare = trxType === 'prepare' || descLower.includes('prepare') || descLower.includes('konversi') || descLower.includes('prep');
@@ -2432,18 +2593,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const isAdj = trxType === 'adjustment' || descLower.includes('penyesuaian') || descLower.includes('opname') || descLower.includes('init') || descLower.includes('adj');
 
         if (isPurchase) {
-          if (m.type === 'in') in_purchase += Number(m.quantity) || 0;
+          if (mType === 'in') in_purchase += Number(m.quantity) || 0;
         } else if (isPrepare) {
-          if (m.type === 'in') in_prepare += Number(m.quantity) || 0;
-          if (m.type === 'out') out_prepare += Number(m.quantity) || 0;
+          if (mType === 'in') in_prepare += Number(m.quantity) || 0;
+          if (mType === 'out') out_prepare += Number(m.quantity) || 0;
         } else if (isProduction) {
-          if (m.type === 'out') out_production += Number(m.quantity) || 0;
+          if (mType === 'out') out_production += Number(m.quantity) || 0;
         } else if (isAdj) {
-          if (m.type === 'in') in_adjustment += Number(m.quantity) || 0;
-          if (m.type === 'out') out_adjustment += Number(m.quantity) || 0;
+          if (mType === 'in') in_adjustment += Number(m.quantity) || 0;
+          if (mType === 'out') out_adjustment += Number(m.quantity) || 0;
         } else {
-          if (m.type === 'in') in_adjustment += Number(m.quantity) || 0;
-          if (m.type === 'out') out_adjustment += Number(m.quantity) || 0;
+          if (mType === 'in') in_adjustment += Number(m.quantity) || 0;
+          if (mType === 'out') out_adjustment += Number(m.quantity) || 0;
         }
       });
 
@@ -2451,8 +2612,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       let in_after = 0;
       let out_after = 0;
       movementsAfter.forEach((m) => {
-        if (m.type === 'in') in_after += Number(m.quantity) || 0;
-        if (m.type === 'out') out_after += Number(m.quantity) || 0;
+        const mType = String(m.type || '').trim().toLowerCase();
+        if (mType === 'in') in_after += Number(m.quantity) || 0;
+        if (mType === 'out') out_after += Number(m.quantity) || 0;
       });
 
       // Stock at the end of targetDate
@@ -2493,8 +2655,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return stockMovements
       .filter((m) => {
         if (!m || !m.ingredient_id) return false;
-        const mId = String(m.ingredient_id).toLowerCase();
-        return mId === targetId || mId === targetCode;
+        const mIngId = (typeof m.ingredient_id === 'object' && m.ingredient_id !== null ? String((m.ingredient_id as any).id || '') : String(m.ingredient_id || '')).trim().toLowerCase();
+        return mIngId === targetId || mIngId === targetCode;
       })
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   };

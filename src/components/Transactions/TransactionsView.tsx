@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
 import { SearchableIngredientSelect } from '../Common/SearchableIngredientSelect';
+import { SearchableMenuSelect } from '../Common/SearchableMenuSelect';
 import {
   TransactionType,
   PurchaseItemInput,
@@ -601,22 +602,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                     >
                       <div className="flex items-center gap-2">
                         <div className="flex-1">
-                          <label className="block text-[10px] font-semibold text-stone-500 mb-1">Pilih Menu</label>
-                          <select
+                          <label className="block text-[10px] font-semibold text-stone-500 mb-1">Pilih Menu (Ketik/Cari)</label>
+                          <SearchableMenuSelect
+                            menus={menus}
                             value={item.menu_id}
-                            onChange={(e) => {
+                            onChange={(newId) => {
                               const next = [...prodItems];
-                              next[idx].menu_id = e.target.value;
+                              next[idx].menu_id = newId;
                               setProdItems(next);
                             }}
-                            className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg bg-white border border-stone-300 focus:outline-none"
-                          >
-                            {menus.map((m) => (
-                              <option key={m.id} value={m.id}>
-                                {m.name} ({m.category})
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </div>
 
                         <div className="w-24">
@@ -809,23 +804,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="md:col-span-2">
-                  <label className="block text-[11px] font-semibold text-stone-600 mb-1">Pilih Bahan PP</label>
-                  <select
+                  <label className="block text-[11px] font-semibold text-stone-600 mb-1">Pilih Target Bahan PP (Prepare)</label>
+                  <SearchableIngredientSelect
+                    ingredients={ingredients.filter((i) => i.type === 'prepared' || i.is_active)}
                     value={prepTargetIngId}
-                    onChange={(e) => setPrepTargetIngId(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-bold text-stone-900 rounded-xl bg-white border border-stone-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {ingredients
-                      .filter((i) => i.type === 'prepared' || i.is_active)
-                      .map((i) => {
-                        const unit = units.find((u) => u.id === i.unit_id);
-                        return (
-                          <option key={i.id} value={i.id}>
-                            [{i.type === 'raw' ? 'Mentah' : 'PP Prepare'}] {i.name} (Stok Saat Ini: {formatNumber(i.current_stock)} {unit?.abbreviation || ''})
-                          </option>
-                        );
-                      })}
-                  </select>
+                    onChange={(newId) => setPrepTargetIngId(newId)}
+                    placeholder="Ketik/Cari bahan target PP..."
+                    className="w-full"
+                  />
                 </div>
 
                 <div>
@@ -1033,8 +1019,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
               <div className="hidden sm:grid grid-cols-12 gap-2 px-3 py-1.5 bg-stone-100 rounded-lg text-[10px] font-bold text-stone-600 uppercase tracking-wider">
                 <div className="col-span-4">Bahan Baku</div>
                 <div className="col-span-2 text-center">Jumlah (Qty)</div>
-                <div className="col-span-2 text-center">Total Harga (Rp)</div>
-                <div className="col-span-3 text-center">Harga Satuan / Unit (Rp)</div>
+                <div className="col-span-3 text-center">Total Harga Beli (Rp)</div>
+                <div className="col-span-2 text-center">Harga Satuan Auto</div>
                 <div className="col-span-1 text-center">Hapus</div>
               </div>
 
@@ -1085,8 +1071,12 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                             value={item.quantity}
                             onChange={(e) => {
                               const newQty = Number(e.target.value) || 0;
+                              const currentSubtotal = (item.quantity || 0) * (item.unit_price || 0);
                               const newItems = [...purItems];
                               newItems[idx].quantity = newQty;
+                              if (newQty > 0 && currentSubtotal > 0) {
+                                newItems[idx].unit_price = currentSubtotal / newQty;
+                              }
                               setPurItems(newItems);
                             }}
                             className="w-full text-xs font-mono font-bold text-stone-900 focus:outline-none"
@@ -1097,26 +1087,27 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                         </div>
                       </div>
 
-                      {/* Total Price Input (Automatic Division) */}
-                      <div className="sm:col-span-2">
+                      {/* Total Price Input (Primary Input) */}
+                      <div className="sm:col-span-3">
                         <label className="block text-[10px] font-semibold text-stone-500 sm:hidden mb-1">
                           Total Harga Beli (Rp)
                         </label>
-                        <div className="flex items-center bg-white border border-stone-200 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
-                          <span className="px-1.5 py-1.5 text-[10px] font-bold text-stone-500 bg-stone-100 border-r border-stone-200 shrink-0">
-                            Total Rp
+                        <div className="flex items-center bg-white border border-emerald-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 shadow-2xs">
+                          <span className="px-2 py-1.5 text-[10px] font-bold text-emerald-800 bg-emerald-50 border-r border-emerald-200 shrink-0">
+                            Rp Total
                           </span>
                           <input
                             type="number"
                             step="any"
                             min="0"
-                            placeholder="Total Rp"
-                            value={subtotal ? Math.round(subtotal * 100) / 100 : ''}
+                            required
+                            placeholder="Input Total Harga"
+                            value={subtotal > 0 ? Math.round(subtotal * 100) / 100 : ''}
                             onChange={(e) => {
                               const totalCost = Number(e.target.value) || 0;
                               const qty = item.quantity || 1;
                               const newItems = [...purItems];
-                              newItems[idx].unit_price = qty > 0 ? Math.round((totalCost / qty) * 100) / 100 : 0;
+                              newItems[idx].unit_price = qty > 0 ? totalCost / qty : 0;
                               setPurItems(newItems);
                             }}
                             className="w-full px-2 py-1.5 text-xs font-mono font-bold text-emerald-900 focus:outline-none"
@@ -1124,28 +1115,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                         </div>
                       </div>
 
-                      {/* Unit Price Input with Rp Prefix */}
-                      <div className="sm:col-span-3">
+                      {/* Calculated Unit Price Display */}
+                      <div className="sm:col-span-2">
                         <label className="block text-[10px] font-semibold text-stone-500 sm:hidden mb-1">
-                          Harga Satuan (Rp)
+                          Harga Satuan Auto (Rp/Unit)
                         </label>
-                        <div className="flex items-center bg-white border border-stone-200 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
-                          <span className="px-2 py-1.5 text-[10px] font-bold text-stone-500 bg-stone-100 border-r border-stone-200 shrink-0">
-                            Rp/Unit
-                          </span>
-                          <input
-                            type="number"
-                            step="any"
-                            min="0"
-                            placeholder="Harga/Unit"
-                            value={item.unit_price}
-                            onChange={(e) => {
-                              const newItems = [...purItems];
-                              newItems[idx].unit_price = Number(e.target.value);
-                              setPurItems(newItems);
-                            }}
-                            className="w-full px-2 py-1.5 text-xs font-mono font-bold text-stone-900 focus:outline-none"
-                          />
+                        <div className="flex items-center justify-between bg-stone-100 border border-stone-200 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-stone-700">
+                          <span className="text-[10px] text-stone-400 font-sans">@</span>
+                          <span>{formatNumber(Math.round((item.unit_price || 0) * 100) / 100)}</span>
                         </div>
                       </div>
 
