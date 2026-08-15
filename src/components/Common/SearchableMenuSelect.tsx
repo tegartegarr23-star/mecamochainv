@@ -174,22 +174,12 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
           }`}
         >
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-            <span className="font-extrabold text-stone-900 text-sm truncate block">
+            <span className="font-bold text-stone-900 text-sm truncate block">
               {selectedMenu.name}
-            </span>
-            <span className="text-[10px] text-stone-500 font-semibold bg-stone-100 px-1.5 py-0.5 rounded border border-stone-200 shrink-0">
-              {selectedMenu.category}
             </span>
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {selectedMenu.price > 0 && (
-              <span className="text-[11px] font-bold text-amber-900 font-mono bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                {formatCurrency(selectedMenu.price)}
-              </span>
-            )}
-
             {!disabled && (
               <button
                 type="button"
@@ -203,11 +193,11 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                 className="p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
                 title="Ganti / Hapus Menu"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
             )}
 
-            <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
+            <ChevronDown className="w-4 h-4 text-stone-400" />
           </div>
         </div>
       ) : (
