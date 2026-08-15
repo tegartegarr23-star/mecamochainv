@@ -145,12 +145,19 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
 
   // 1. Purchase Form State
   const [purDate, setPurDate] = useState(new Date().toISOString().slice(0, 10));
-  const [purSupplierId, setPurSupplierId] = useState(suppliers[0]?.id || '');
+  const [purSupplierInput, setPurSupplierInput] = useState(suppliers[0]?.name || '');
   const [purRefNo, setPurRefNo] = useState(generateRefNo('PUR'));
   const [purNotes, setPurNotes] = useState('');
   const [purItems, setPurItems] = useState<PurchaseItemInput[]>([
     { ingredient_id: ingredients[0]?.id || '', quantity: 1000, unit_price: 50 },
   ]);
+
+  // Keep default supplier input populated if empty
+  useEffect(() => {
+    if (!purSupplierInput && suppliers.length > 0) {
+      setPurSupplierInput(suppliers[0]?.name || '');
+    }
+  }, [suppliers]);
 
   // 2. Prepare Form State
   const preparedIngredients = ingredients.filter((i) => i.type === 'prepared');
@@ -194,15 +201,32 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   }, [prepTargetIngId]);
 
   const handleTargetQtyChange = (newVal: number) => {
+    const prevVal = lastValidTargetQty.current > 0 ? lastValidTargetQty.current : 1000;
     setPrepTargetQty(newVal);
-    setPrepItems((prev) =>
-      prev.map((item) => {
-        if (item.is_target) {
-          return { ...item, ingredient_id: prepTargetIngId, quantity: newVal };
-        }
-        return item;
-      })
-    );
+
+    if (newVal > 0 && prevVal > 0 && newVal !== prevVal) {
+      const ratio = newVal / prevVal;
+      setPrepItems((prev) =>
+        prev.map((item) => {
+          if (item.is_target) {
+            return { ...item, ingredient_id: prepTargetIngId, quantity: newVal };
+          }
+          const scaledQty = Math.round(item.quantity * ratio * 100) / 100;
+          return { ...item, quantity: scaledQty };
+        })
+      );
+      lastValidTargetQty.current = newVal;
+    } else {
+      setPrepItems((prev) =>
+        prev.map((item) => {
+          if (item.is_target) {
+            return { ...item, ingredient_id: prepTargetIngId, quantity: newVal };
+          }
+          return item;
+        })
+      );
+      if (newVal > 0) lastValidTargetQty.current = newVal;
+    }
   };
 
   const handleSavePrepareFormula = () => {
@@ -213,15 +237,15 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
       return;
     }
 
-    const scaleFactor = prepTargetQty > 0 ? prepTargetQty / 1000 : 1;
+    const currentQty = prepTargetQty > 0 ? prepTargetQty : 1000;
     const formulaDetails = sourceItems.map((item) => ({
       ingredient_id: item.ingredient_id,
-      quantity: scaleFactor > 0 ? item.quantity / scaleFactor : item.quantity,
+      quantity: Math.round(item.quantity * 100) / 100,
     }));
 
     const targetIng = ingredients.find((i) => i.id === prepTargetIngId);
     savePrepareFormula(prepTargetIngId, formulaDetails);
-    alert(`Formula resep standar untuk "${targetIng?.name || 'Bahan Prepare'}" berhasil disimpan! Setiap kali Anda memilih bahan ini, komposisinya akan terisi otomatis.`);
+    alert(`Formula resep standar untuk "${targetIng?.name || 'Bahan Prepare'}" (${currentQty} ${units.find((u) => u.id === targetIng?.unit_id)?.abbreviation || 'unit'}) berhasil disimpan secara permanen! Setiap kali Anda memilih bahan ini, komposisi akan terisi otomatis.`);
   };
 
   // 3. Production Form State
@@ -314,8 +338,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   }, [ingredients]);
 
   useEffect(() => {
-    if (suppliers.length > 0 && (!purSupplierId || !suppliers.some((s) => s.id === purSupplierId))) {
-      setPurSupplierId(suppliers[0].id);
+    if (suppliers.length > 0 && !purSupplierInput) {
+      setPurSupplierInput(suppliers[0].name);
     }
   }, [suppliers]);
 
@@ -363,7 +387,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
       return;
     }
 
-    const supplierToUse = purSupplierId || suppliers[0]?.id || '';
+    const supplierToUse = (purSupplierInput || '').trim() || suppliers[0]?.name || 'Supplier Umum';
 
     addPurchaseTransaction(purDate, supplierToUse, purRefNo, purNotes, sanitizedItems);
     alert('Transaksi Pembelian berhasil disimpan! Stok bahan baku telah bertambah.');
@@ -967,18 +991,47 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {renderQuickDatePicker('Tanggal Pembelian', purDate, setPurDate)}
               <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Supplier</label>
-                <select
-                  value={purSupplierId}
-                  onChange={(e) => setPurSupplierId(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
-                >
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-stone-700">Nama Supplier / Toko</label>
+                  <span className="text-[10px] text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                    Bisa Ketik Manual Bebas
+                  </span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    list="suppliers-datalist"
+                    placeholder="Contoh: Toko Surya, Pasar Induk, dll..."
+                    value={purSupplierInput}
+                    onChange={(e) => setPurSupplierInput(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-bold text-stone-900 rounded-xl bg-stone-50 border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600"
+                  />
+                  <datalist id="suppliers-datalist">
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.name} />
+                    ))}
+                  </datalist>
+                </div>
+                {suppliers.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                    <span className="text-[10px] text-stone-400 font-medium">Pilihan cepat:</span>
+                    {suppliers.slice(0, 4).map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setPurSupplierInput(s.name)}
+                        className={`px-2 py-0.5 text-[10px] font-semibold rounded-md border transition-all ${
+                          purSupplierInput.trim().toLowerCase() === s.name.trim().toLowerCase()
+                            ? 'bg-emerald-800 text-white border-emerald-800 shadow-2xs'
+                            : 'bg-white text-stone-600 border-stone-200 hover:bg-stone-100'
+                        }`}
+                      >
+                        {s.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-semibold text-stone-700 mb-1">No. Invoice / Ref</label>

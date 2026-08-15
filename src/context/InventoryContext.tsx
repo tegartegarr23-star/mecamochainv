@@ -142,6 +142,7 @@ const STORAGE_KEYS = {
   MENUS: 'mecamocha_menus_v3',
   RECIPES: 'mecamocha_recipes_v3',
   RECIPE_DETAILS: 'mecamocha_recipe_details_v3',
+  PREPARE_FORMULAS: 'mecamocha_prepare_formulas_v3',
   TRANSACTIONS: 'mecamocha_transactions_v3',
   STOCK_MOVEMENTS: 'mecamocha_stock_movements_v3',
   DELETED_ING_IDS: 'mecamocha_deleted_ing_ids_v3',
@@ -237,6 +238,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   });
   const [recipes, setRecipes] = useState<Recipe[]>(() => loadFromStorage(STORAGE_KEYS.RECIPES, INITIAL_RECIPES));
   const [recipeDetails, setRecipeDetails] = useState<RecipeDetail[]>(() => sanitizeRecipeDetails(loadFromStorage(STORAGE_KEYS.RECIPE_DETAILS, INITIAL_RECIPE_DETAILS)));
+  const [prepareFormulas, setPrepareFormulas] = useState<Record<string, Array<{ ingredient_id: string; quantity: number }>>>(() => loadFromStorage(STORAGE_KEYS.PREPARE_FORMULAS, {}));
   const [transactions, setTransactions] = useState<Transaction[]>(() => loadFromStorage(STORAGE_KEYS.TRANSACTIONS, INITIAL_TRANSACTIONS));
   const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => loadFromStorage(STORAGE_KEYS.STOCK_MOVEMENTS, INITIAL_STOCK_MOVEMENTS));
   const deletedTrxIdsRef = useRef<Set<string>>(new Set());
@@ -838,16 +840,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         };
       });
 
-      const cleanRecipes = activeRecipes
-        .filter((r) => activeMenus.some((m) => m.id === r.menu_id))
-        .map((r) => ({
+      const cleanRecipes = activeRecipes.map((r) => {
+        const isMenuRecipe = activeMenus.some((m) => m.id === r.menu_id);
+        return {
           id: String(r.id),
-          menu_id: String(r.menu_id),
+          menu_id: isMenuRecipe ? String(r.menu_id) : null,
           version: Number(r.version) || 1,
           is_active: r.is_active ?? true,
           notes: r.notes || null,
           created_at: r.created_at || new Date().toISOString(),
-        }));
+        };
+      });
 
       const cleanRecipeDetails = activeRecipeDetails
         .filter((rd) => activeIngredients.some((i) => i.id === rd.ingredient_id))
@@ -1652,10 +1655,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }));
 
     // Clean recipes state: keep 1 recipe per menu_id
-    setRecipes((prev) => [
-      ...prev.filter((r) => r.menu_id !== menuId && r.id !== recipeId),
-      recipeObj,
-    ]);
+    setRecipes((prev) => {
+      const next = [
+        ...prev.filter((r) => r.menu_id !== menuId && r.id !== recipeId),
+        recipeObj,
+      ];
+      saveToStorage(STORAGE_KEYS.RECIPES, next);
+      return next;
+    });
 
     // Build set of all recipe IDs associated with this menu
     const possibleRecipeIds = new Set<string>([
@@ -1667,8 +1674,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     recipes.filter((r) => r.menu_id === menuId).forEach((r) => possibleRecipeIds.add(r.id));
 
     // Replace all existing details for this recipe/menu with sanitized new details
-    setRecipeDetails((prev) =>
-      sanitizeRecipeDetails([
+    setRecipeDetails((prev) => {
+      const next = sanitizeRecipeDetails([
         ...prev.filter(
           (rd) =>
             !rd ||
@@ -1678,12 +1685,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               !rd.id.includes(recipeId))
         ),
         ...newDetails,
-      ])
-    );
+      ]);
+      saveToStorage(STORAGE_KEYS.RECIPE_DETAILS, next);
+      return next;
+    });
 
-    setMenus((prev) =>
-      prev.map((m) => (m.id === menuId ? { ...m, active_recipe_version: recipeVersion } : m))
-    );
+    setMenus((prev) => {
+      const next = prev.map((m) => (m.id === menuId ? { ...m, active_recipe_version: recipeVersion } : m));
+      saveToStorage(STORAGE_KEYS.MENUS, next);
+      return next;
+    });
 
     try {
       const supabase = getSupabase();
@@ -1824,6 +1835,23 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       };
     }
 
+    // 1. First priority: Check prepareFormulas direct map
+    if (prepareFormulas && prepareFormulas[prepIngredientId] && prepareFormulas[prepIngredientId].length > 0) {
+      const details = prepareFormulas[prepIngredientId].map((d) => {
+        const ing = ingredients.find((i) => i.id === d.ingredient_id || i.code === d.ingredient_id);
+        const unit = units.find((u) => u.id === ing?.unit_id);
+        return {
+          id: `rd-rec-prep-${prepIngredientId}-${d.ingredient_id}`,
+          recipe_id: canonicalRecipeId,
+          ingredient_id: d.ingredient_id,
+          quantity: d.quantity,
+          ingredient: ing,
+          unit: unit,
+        };
+      });
+      return { recipe, details };
+    }
+
     const possibleRecipeIds = new Set<string>([
       recipe.id,
       canonicalRecipeId,
@@ -1866,22 +1894,44 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     }
 
-    const newDetails: RecipeDetail[] = Array.from(uniqueDetailsMap.entries()).map(([ingId, qty]) => ({
-      id: `rd-rec-prep-${prepIngredientId}-${ingId}`,
-      recipe_id: canonicalRecipeId,
+    const cleanInputDetails = Array.from(uniqueDetailsMap.entries()).map(([ingId, qty]) => ({
       ingredient_id: ingId,
       quantity: qty,
     }));
 
-    setRecipes((prev) => [
-      ...prev.filter((r) => r.menu_id !== prepIngredientId && r.id !== canonicalRecipeId),
-      recipeObj,
-    ]);
+    const newDetails: RecipeDetail[] = cleanInputDetails.map((item) => ({
+      id: `rd-rec-prep-${prepIngredientId}-${item.ingredient_id}`,
+      recipe_id: canonicalRecipeId,
+      ingredient_id: item.ingredient_id,
+      quantity: item.quantity,
+    }));
 
-    setRecipeDetails((prev) => [
-      ...prev.filter((rd) => rd && rd.recipe_id !== canonicalRecipeId && !rd.id?.includes(`rec-prep-${prepIngredientId}`)),
-      ...newDetails,
-    ]);
+    // 1. Update prepareFormulas state and localStorage
+    setPrepareFormulas((prev) => {
+      const next = { ...prev, [prepIngredientId]: cleanInputDetails };
+      saveToStorage(STORAGE_KEYS.PREPARE_FORMULAS, next);
+      return next;
+    });
+
+    // 2. Update recipes state and localStorage
+    setRecipes((prev) => {
+      const next = [
+        ...prev.filter((r) => r.menu_id !== prepIngredientId && r.id !== canonicalRecipeId),
+        recipeObj,
+      ];
+      saveToStorage(STORAGE_KEYS.RECIPES, next);
+      return next;
+    });
+
+    // 3. Update recipeDetails state and localStorage
+    setRecipeDetails((prev) => {
+      const next = sanitizeRecipeDetails([
+        ...prev.filter((rd) => rd && rd.recipe_id !== canonicalRecipeId && !rd.id?.includes(`rec-prep-${prepIngredientId}`)),
+        ...newDetails,
+      ]);
+      saveToStorage(STORAGE_KEYS.RECIPE_DETAILS, next);
+      return next;
+    });
 
     try {
       const supabase = getSupabase();
@@ -1912,7 +1962,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Transactions Handlers
   const addPurchaseTransaction = (
     date: string,
-    supplierId: string,
+    supplierIdOrName: string,
     refNo: string,
     notes: string,
     items: PurchaseItemInput[]
@@ -1921,12 +1971,51 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const trxId = `trx-pur-${now}`;
     const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
     const actualRefNo = refNo || generateRefNo('PUR');
+
+    // Supplier auto-resolution: check by ID or Name; if new name, auto-create supplier
+    let resolvedSupplierId = suppliers[0]?.id || '';
+    const cleanSupplierInput = (supplierIdOrName || '').trim();
+
+    if (cleanSupplierInput) {
+      const matchById = suppliers.find((s) => s.id === cleanSupplierInput);
+      const matchByName = suppliers.find(
+        (s) => s.name.trim().toLowerCase() === cleanSupplierInput.toLowerCase()
+      );
+
+      if (matchById) {
+        resolvedSupplierId = matchById.id;
+      } else if (matchByName) {
+        resolvedSupplierId = matchByName.id;
+      } else {
+        // Auto-create new supplier with the entered name
+        const newSupId = `s-${now}`;
+        const newSup: Supplier = {
+          id: newSupId,
+          name: cleanSupplierInput,
+          contact: '',
+          address: 'Input Manual Pembelian',
+        };
+        resolvedSupplierId = newSupId;
+        setSuppliers((prev) => {
+          const next = [...prev, newSup];
+          saveToStorage(STORAGE_KEYS.SUPPLIERS, next);
+          return next;
+        });
+        try {
+          const supabase = getSupabase();
+          if (supabase) {
+            supabase.from('suppliers').upsert([newSup]).then();
+          }
+        } catch {}
+      }
+    }
+
     const newTrx: Transaction = {
       id: trxId,
       type: 'purchase',
       transaction_date: isoDate,
       reference_no: actualRefNo,
-      supplier_id: supplierId || suppliers[0]?.id || '',
+      supplier_id: resolvedSupplierId,
       notes,
       created_by: currentUser.name,
       created_at: new Date(now).toISOString(),
@@ -1960,7 +2049,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           cost_per_unit: item.unit_price > 0 ? Number(item.unit_price) : Number(currentIng.cost_per_unit),
         };
 
-        const supplierName = suppliers.find((s) => s.id === supplierId)?.name || 'Supplier';
+        const supplierName = suppliers.find((s) => s.id === resolvedSupplierId)?.name || cleanSupplierInput || 'Supplier';
         newMovements.push({
           id: `mov-${now}-${index}`,
           transaction_id: trxId,
