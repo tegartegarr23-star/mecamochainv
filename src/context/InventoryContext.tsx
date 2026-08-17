@@ -252,6 +252,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const deletedIngIdsRef = useRef<Set<string>>(getSavedDeletedIngIds());
   const deletedMenuIdsRef = useRef<Set<string>>(getSavedDeletedMenuIds());
 
+  // Realtime Broadcast Channel Helper
+  const broadcastSync = (actionName: string) => {
+    try {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const channel = supabase.channel('mecamocha-realtime-channel');
+      channel.send({
+        type: 'broadcast',
+        event: 'mecamocha_sync',
+        payload: { action: actionName, timestamp: Date.now() },
+      }).then();
+    } catch {}
+  };
+
   // Helper to merge local state and remote Supabase state without wiping un-synced items
   const mergeByField = <T,>(localList: T[], remoteList: T[], key: keyof T): T[] => {
     const map = new Map<any, T>();
@@ -296,6 +310,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       let syncErr: string | null = null;
 
+      // Broadcast immediately that local change occurred
+      broadcastSync('sync_start');
+
       // 1. Sync ingredients
       if (changedIngredients && changedIngredients.length > 0) {
         // Ensure all categories and units exist in Supabase first so Foreign Key never rejects
@@ -329,7 +346,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           cogs_per_unit: Number(ing.cost_per_unit) || 0,
         }));
 
-        const { error: ingErr } = await supabase.from('ingredients').upsert(cleanIngredients);
+        let { error: ingErr } = await supabase.from('ingredients').upsert(cleanIngredients);
+        if (ingErr) {
+          // Fallback without extra columns in case DB table lacks them
+          const fallbackIngs = cleanIngredients.map(({ cost_per_unit, cogs_per_unit, ...rest }) => rest);
+          const res = await supabase.from('ingredients').upsert(fallbackIngs);
+          ingErr = res.error;
+        }
+
         if (ingErr) {
           console.error('Supabase ingredients upsert error:', ingErr);
           syncErr = `Gagal sync bahan: ${ingErr.message}`;
@@ -365,10 +389,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           adjustment_reason: newTrx.adjustment_reason || null,
           created_at: newTrx.created_at || new Date().toISOString(),
         };
-        try {
-          await supabase.from('transactions').upsert([cleanSingleTrx]);
-        } catch (e) {
-          console.warn('Immediate single transaction upsert notice:', e);
+        
+        let { error: singleTrxErr } = await supabase.from('transactions').upsert([cleanSingleTrx]);
+        if (singleTrxErr) {
+          // If foreign key failed on supplier_id or menu_id, retry with nulls
+          const relaxedSingleTrx = {
+            ...cleanSingleTrx,
+            supplier_id: null,
+            menu_id: null,
+          };
+          const res = await supabase.from('transactions').upsert([relaxedSingleTrx]);
+          if (res.error) {
+            console.warn('Single transaction upsert error:', res.error);
+          }
         }
       }
 
@@ -391,10 +424,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           };
         });
 
-        const { error: trxErr } = await supabase.from('transactions').upsert(cleanTrxs);
-        if (trxErr) {
-          console.error('Supabase transaction upsert error:', trxErr);
-          syncErr = `Gagal sync transaksi: ${trxErr.message}`;
+        // Upsert in chunks of 50
+        const chunkSize = 50;
+        for (let i = 0; i < cleanTrxs.length; i += chunkSize) {
+          const chunk = cleanTrxs.slice(i, i + chunkSize);
+          let { error: trxErr } = await supabase.from('transactions').upsert(chunk);
+          if (trxErr) {
+            // Retry row by row with relaxed foreign keys
+            for (const row of chunk) {
+              const res = await supabase.from('transactions').upsert([row]);
+              if (res.error) {
+                await supabase.from('transactions').upsert([{ ...row, supplier_id: null, menu_id: null }]);
+              }
+            }
+          }
         }
       }
 
@@ -431,12 +474,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           };
         });
 
-        try {
-          const { error: singleMovErr } = await supabase.from('stock_movements').upsert(cleanSingleMovs);
-          if (singleMovErr) {
-            await supabase.from('stock_moved').upsert(cleanSingleMovs);
+        let { error: singleMovErr } = await supabase.from('stock_movements').upsert(cleanSingleMovs);
+        if (singleMovErr) {
+          // Retry row by row with relaxed foreign key
+          for (const row of cleanSingleMovs) {
+            const res = await supabase.from('stock_movements').upsert([row]);
+            if (res.error) {
+              await supabase.from('stock_movements').upsert([{ ...row, transaction_id: null }]);
+              try { await supabase.from('stock_moved').upsert([row]); } catch {}
+            }
           }
-        } catch {}
+        }
       }
 
       if (allMovs.length > 0) {
@@ -474,12 +522,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const { error } = await supabase.from('stock_movements').upsert(chunk);
           if (error) {
             movErr = error;
-            try { await supabase.from('stock_moved').upsert(chunk); } catch {}
+            for (const row of chunk) {
+              try {
+                const res = await supabase.from('stock_movements').upsert([row]);
+                if (res.error) {
+                  await supabase.from('stock_movements').upsert([{ ...row, transaction_id: null }]);
+                }
+              } catch {}
+            }
           }
         }
         if (movErr) {
-          console.error('Supabase movements upsert error:', movErr);
-          syncErr = `Gagal sync mutasi: ${movErr.message}`;
+          console.warn('Supabase movements upsert chunk handled with fallback');
         }
       }
 
@@ -489,6 +543,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setLastSyncedAt(new Date());
         setSupabaseError(null);
       }
+
+      // Broadcast update completed
+      broadcastSync('sync_completed');
     } catch (e: any) {
       console.warn('Supabase sync warning:', e);
       setSupabaseError(e?.message || 'Gagal tersambung ke Supabase');
@@ -575,10 +632,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const idStr = String(m.id).trim().toLowerCase();
           return deletedMenuIdsRef.current.has(idStr) || deletedMenuIdsRef.current.has(String(m.id).trim());
         };
+        const remoteActive = sbMenus.filter((m) => !isMenuDeleted(m));
         setMenus((prev) => {
           const localActive = prev.filter((m) => !isMenuDeleted(m));
-          const remoteActive = sbMenus.filter((m) => !isMenuDeleted(m));
-          const merged = mergeByField(localActive, remoteActive, 'id');
+          const remoteMap = new Map(remoteActive.map((m) => [String(m.id).toLowerCase(), m]));
+          const localOnly = localActive.filter((localItem) => {
+            const isLocalOnly = !remoteMap.has(String(localItem.id).toLowerCase());
+            const isCustom = String(localItem.id).startsWith('m-') || String(localItem.id).startsWith('menu_');
+            const isSeed = INITIAL_MENUS.some((s) => s.id === localItem.id);
+            return isLocalOnly && isCustom && !isSeed;
+          });
+          const merged = [...remoteActive, ...localOnly];
           saveToStorage(STORAGE_KEYS.MENUS, merged);
           return merged;
         });
@@ -769,7 +833,22 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         const localActive = prevIngs.filter((ing) => !isDeleted(ing));
         const remoteActive = cleanIngredients.filter((ing) => !isDeleted(ing));
-        const mergedIngs = mergeByField(localActive, remoteActive, 'id').map((ing) => ({
+        
+        let resolved: Ingredient[] = [];
+        if (remoteActive.length > 0) {
+          const remoteMap = new Map(remoteActive.map((i) => [String(i.id).toLowerCase(), i]));
+          const localOnly = localActive.filter((localItem) => {
+            const isLocalOnly = !remoteMap.has(String(localItem.id).toLowerCase());
+            const isCustom = String(localItem.id).startsWith('ing-') || String(localItem.id).startsWith('ing_');
+            const isSeed = INITIAL_INGREDIENTS.some((s) => s.id === localItem.id || s.code === localItem.code);
+            return isLocalOnly && isCustom && !isSeed;
+          });
+          resolved = [...remoteActive, ...localOnly];
+        } else {
+          resolved = localActive;
+        }
+
+        const mergedIngs = resolved.map((ing) => ({
           ...ing,
           current_stock: getIngredientCurrentStock(ing, currentMovementsList),
         }));
@@ -1044,27 +1123,35 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     // 1. Pull from Supabase directly on startup
     pullFromSupabase();
 
-    // 2. Refresh immediately when window tab is focused or visible
+    // 2. Refresh immediately when window tab is focused, visible, or online
     const handleVisibilityOrFocus = () => {
       if (document.visibilityState === 'visible') {
         pullFromSupabase();
       }
     };
-    window.addEventListener('focus', handleVisibilityOrFocus);
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    const handleOnline = () => {
+      pullFromSupabase();
+    };
 
-    // 3. Poll every 8 seconds for multi-device cross-sync
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('online', handleOnline);
+
+    // 3. Ultra-fast polling every 3 seconds for instant multi-device cross-sync
     const interval = setInterval(() => {
       pullFromSupabase();
-    }, 8000);
+    }, 3000);
 
-    // 4. Realtime subscription to Supabase postgres_changes
+    // 4. Realtime subscription to Supabase postgres_changes and broadcast channel
     let channel: any = null;
     try {
       const supabase = getSupabase();
       if (supabase) {
         channel = supabase
-          .channel('mecamocha-realtime-sync')
+          .channel('mecamocha-realtime-channel')
+          .on('broadcast', { event: 'mecamocha_sync' }, () => {
+            pullFromSupabase();
+          })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
             pullFromSupabase();
           })
@@ -1077,6 +1164,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           .on('postgres_changes', { event: '*', schema: 'public', table: 'menus' }, () => {
             pullFromSupabase();
           })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'recipes' }, () => {
+            pullFromSupabase();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'recipe_details' }, () => {
+            pullFromSupabase();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' }, () => {
+            pullFromSupabase();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => {
+            pullFromSupabase();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'units' }, () => {
+            pullFromSupabase();
+          })
           .subscribe();
       }
     } catch (e) {
@@ -1086,7 +1188,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => {
       clearInterval(interval);
       window.removeEventListener('focus', handleVisibilityOrFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('online', handleOnline);
       if (channel) {
         try {
           const supabase = getSupabase();

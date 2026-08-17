@@ -53,7 +53,10 @@ ALTER TABLE public.suppliers DISABLE ROW LEVEL SECURITY;
 
 -- 4. Berikan izin akses penuh ke public/anon role:
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;`;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+
+-- 5. Aktifkan Replikasi Realtime Otomatis Multi-Device (HP & Laptop sinkron instan):
+ALTER PUBLICATION supabase_realtime ADD TABLE public.ingredients, public.stock_movements, public.transactions, public.menus, public.recipes, public.recipe_details, public.units, public.categories, public.suppliers;`;
 
   const handleCopySql = () => {
     navigator.clipboard.writeText(sqlFixCode);
