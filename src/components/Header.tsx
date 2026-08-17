@@ -35,8 +35,10 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setIsOpenSidebar, onO
 ALTER TABLE public.ingredients ADD COLUMN IF NOT EXISTS cost_per_unit DOUBLE PRECISION DEFAULT 0;
 ALTER TABLE public.ingredients ADD COLUMN IF NOT EXISTS cogs_per_unit DOUBLE PRECISION DEFAULT 0;
 
--- 2. Tambahkan kolom active_recipe_version di menus:
+-- 2. Tambahkan kolom active_recipe_version di menus & relaksasi kolom movements:
 ALTER TABLE public.menus ADD COLUMN IF NOT EXISTS active_recipe_version INT DEFAULT 1;
+ALTER TABLE public.stock_movements ALTER COLUMN balance_after SET DEFAULT 0;
+ALTER TABLE public.stock_movements ALTER COLUMN balance_after DROP NOT NULL;
 
 -- 3. Matikan Row Level Security (RLS) agar semua laptop/device dapat membaca & menyimpan data secara realtime:
 ALTER TABLE public.ingredients DISABLE ROW LEVEL SECURITY;

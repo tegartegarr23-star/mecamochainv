@@ -58,6 +58,42 @@ export function formatDate(dateString: string, includeTime: boolean = false): st
 }
 
 /**
+ * Generates ISO string using the user's current local time when given a date string (YYYY-MM-DD)
+ * to avoid hardcoded 12:00 UTC (which became 19:00 WIB).
+ */
+export function createLocalDateTimeIso(dateInput?: string | Date): string {
+  const now = new Date();
+  if (!dateInput) return now.toISOString();
+
+  if (dateInput instanceof Date) {
+    return isNaN(dateInput.getTime()) ? now.toISOString() : dateInput.toISOString();
+  }
+
+  const str = String(dateInput).trim();
+  if (!str) return now.toISOString();
+
+  // If already full ISO timestamp with T
+  if (str.includes('T')) {
+    const parsed = new Date(str);
+    return isNaN(parsed.getTime()) ? now.toISOString() : str;
+  }
+
+  // Parse YYYY-MM-DD
+  const match = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]) - 1;
+    const day = Number(match[3]);
+    // Create Date in local timezone with current hours, minutes, seconds
+    const localDate = new Date(year, month, day, now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+    return localDate.toISOString();
+  }
+
+  const fallback = new Date(str);
+  return isNaN(fallback.getTime()) ? now.toISOString() : fallback.toISOString();
+}
+
+/**
  * Generates transaction reference number e.g. TRX-PUR-20260816-001 using local date
  */
 export function generateRefNo(prefix: string, dateInput?: string | Date): string {

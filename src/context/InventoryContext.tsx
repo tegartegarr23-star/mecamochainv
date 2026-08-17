@@ -29,7 +29,7 @@ import {
   INITIAL_TRANSACTIONS,
   INITIAL_STOCK_MOVEMENTS,
 } from '../data/seedData';
-import { generateRefNo } from '../utils/formatters';
+import { generateRefNo, createLocalDateTimeIso } from '../utils/formatters';
 import { getSupabase } from '../lib/supabase';
 
 interface ProductionSufficiencyResult {
@@ -425,7 +425,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             ingredient_id: ingId,
             type: String(m.type),
             quantity: Number(m.quantity) || 0,
-            balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : null,
+            balance_after: Number(m.balance_after ?? 0),
             description: m.description || null,
             created_at: m.created_at || new Date().toISOString(),
           };
@@ -460,18 +460,22 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             ingredient_id: ingId,
             type: String(m.type),
             quantity: Number(m.quantity) || 0,
-            balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : null,
+            balance_after: Number(m.balance_after ?? 0),
             description: m.description || null,
             created_at: m.created_at || new Date().toISOString(),
           };
         });
 
-        let { error: movErr } = await supabase.from('stock_movements').upsert(cleanMovements);
-        if (movErr) {
-          try {
-            const resMoved = await supabase.from('stock_moved').upsert(cleanMovements);
-            if (!resMoved.error) movErr = null;
-          } catch {}
+        // Upsert movements in chunks of 50 to prevent timeout
+        const chunkSize = 50;
+        let movErr: any = null;
+        for (let i = 0; i < cleanMovements.length; i += chunkSize) {
+          const chunk = cleanMovements.slice(i, i + chunkSize);
+          const { error } = await supabase.from('stock_movements').upsert(chunk);
+          if (error) {
+            movErr = error;
+            try { await supabase.from('stock_moved').upsert(chunk); } catch {}
+          }
         }
         if (movErr) {
           console.error('Supabase movements upsert error:', movErr);
@@ -519,8 +523,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         supabase.from('menus').select('*').order('name', { ascending: true }),
         supabase.from('recipes').select('*'),
         supabase.from('recipe_details').select('*'),
-        supabase.from('transactions').select('*').order('created_at', { ascending: false }),
-        supabase.from('stock_movements').select('*').order('created_at', { ascending: false }),
+        supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(5000),
+        supabase.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(5000),
       ]);
 
       if (ingErr || trxErr || movErr) {
@@ -807,16 +811,31 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }));
 
       // Step 1: Push reference tables
-      const refResults = await Promise.all([
-        supabase.from('units').upsert(cleanUnits),
-        supabase.from('categories').upsert(cleanCategories),
-        supabase.from('suppliers').upsert(cleanSuppliers),
-      ]);
-      const refErr = refResults.find((r) => r.error)?.error;
+      let refErr: any = null;
+      try {
+        const refResults = await Promise.all([
+          supabase.from('units').upsert(cleanUnits),
+          supabase.from('categories').upsert(cleanCategories),
+          supabase.from('suppliers').upsert(cleanSuppliers),
+        ]);
+        refErr = refResults.find((r) => r.error)?.error;
+      } catch (err: any) {
+        refErr = err;
+      }
+
       if (refErr) {
-        console.warn('Push reference tables warning:', refErr);
+        const isFetchFailed = String(refErr?.message || refErr).toLowerCase().includes('failed to fetch');
+        if (!isFetchFailed) {
+          console.warn('Push reference tables warning:', refErr);
+        }
         const isRls = refErr.message?.toLowerCase().includes('security') || refErr.message?.toLowerCase().includes('policy') || refErr.code === '42501';
-        setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS). Klik "Fix Supabase" di kanan atas.' : (refErr.message || 'Gagal push kategori/satuan'));
+        setSupabaseError(
+          isFetchFailed
+            ? 'Koneksi ke Supabase offline/terputus. Data tetap aman di penyimpanan lokal.'
+            : isRls
+            ? 'Akses Simpan Supabase diblokir (RLS). Klik "Fix Supabase" di kanan atas.'
+            : (refErr.message || 'Gagal push kategori/satuan')
+        );
         return false;
       }
 
@@ -971,31 +990,40 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           ingredient_id: ingId,
           type: String(m.type),
           quantity: Number(m.quantity) || 0,
-          balance_after: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : null,
+          balance_after: Number(m.balance_after ?? 0),
           description: m.description || null,
           created_at: m.created_at || new Date().toISOString(),
         };
       });
 
       if (cleanTrxs.length > 0) {
-        const { error: trxErr } = await supabase.from('transactions').upsert(cleanTrxs);
-        if (trxErr) {
-          console.warn('Push transactions warning:', trxErr);
-          const isRls = trxErr.message?.toLowerCase().includes('security') || trxErr.message?.toLowerCase().includes('policy') || trxErr.code === '42501';
-          setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS Policy).' : (trxErr.message || 'Gagal push transaksi'));
-          return false;
+        const chunkSize = 50;
+        for (let i = 0; i < cleanTrxs.length; i += chunkSize) {
+          const chunk = cleanTrxs.slice(i, i + chunkSize);
+          const { error: trxErr } = await supabase.from('transactions').upsert(chunk);
+          if (trxErr) {
+            console.warn('Push transactions warning:', trxErr);
+            const isRls = trxErr.message?.toLowerCase().includes('security') || trxErr.message?.toLowerCase().includes('policy') || trxErr.code === '42501';
+            setSupabaseError(isRls ? 'Akses Simpan Supabase diblokir (RLS Policy).' : (trxErr.message || 'Gagal push transaksi'));
+            return false;
+          }
         }
       }
 
       if (cleanMovs.length > 0) {
-        let { error: movErr } = await supabase.from('stock_movements').upsert(cleanMovs);
-        try { await supabase.from('stock_moved').upsert(cleanMovs); } catch {}
-        if (movErr && movErr.message?.includes('does not exist')) {
-          const res = await supabase.from('stock_moved').upsert(cleanMovs);
-          movErr = res.error;
-        }
-        if (movErr) {
-          console.warn('Push stock movements warning:', movErr);
+        const chunkSize = 50;
+        for (let i = 0; i < cleanMovs.length; i += chunkSize) {
+          const chunk = cleanMovs.slice(i, i + chunkSize);
+          let { error: movErr } = await supabase.from('stock_movements').upsert(chunk);
+          if (movErr) {
+            try { await supabase.from('stock_moved').upsert(chunk); } catch {}
+            // Fallback row by row
+            for (const row of chunk) {
+              try {
+                await supabase.from('stock_movements').upsert([row]);
+              } catch {}
+            }
+          }
         }
       }
 
@@ -1984,7 +2012,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   ) => {
     const now = Date.now();
     const trxId = `trx-pur-${now}`;
-    const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
+    const isoDate = createLocalDateTimeIso(date);
     const actualRefNo = refNo || generateRefNo('PUR');
 
     // Supplier auto-resolution: check by ID or Name; if new name, auto-create supplier
@@ -2103,7 +2131,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   ) => {
     const now = Date.now();
     const trxId = `trx-prep-${now}`;
-    const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
+    const isoDate = createLocalDateTimeIso(date);
     const actualRefNo = refNo || generateRefNo('PREP');
     const newTrx: Transaction = {
       id: trxId,
@@ -2260,7 +2288,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const now = Date.now();
     const trxId = `trx-prod-${now}`;
-    const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
+    const isoDate = createLocalDateTimeIso(date);
     const actualRefNo = refNo || generateRefNo('PROD');
 
     const primaryMenuId = items[0]?.menu_id || '';
@@ -2397,7 +2425,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const trxId = `trx-adj-${now}`;
     const refNo = generateRefNo('ADJ');
 
-    const isoDate = date ? (date.includes('T') ? date : `${date}T12:00:00.000Z`) : new Date(now).toISOString();
+    const isoDate = createLocalDateTimeIso(date);
     const newTrx: Transaction = {
       id: trxId,
       type: 'adjustment',

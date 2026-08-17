@@ -1763,28 +1763,58 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                         </div>
                       );
                     } else if (trx.type === 'adjustment') {
-                      const adjIng = ingredients.find((i) => i.id === trxMovs[0]?.ingredient_id || i.code === trxMovs[0]?.ingredient_id);
-                      const ingName = adjIng ? adjIng.name : 'Bahan';
-                      const unit = units.find((u) => u.id === adjIng?.unit_id);
-                      const moveType = trxMovs[0]?.type === 'in' ? '+' : '-';
-                      detailContent = (
-                        <div className="space-y-0.5">
-                          <div className="font-bold text-stone-900 flex items-center gap-1.5 flex-wrap">
-                            <span>⚖️ Penyesuaian: {ingName}</span>
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                              trxMovs[0]?.type === 'in'
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                : 'bg-rose-50 text-rose-800 border-rose-200'
-                            }`}>
-                              {moveType}{formatNumber(trxMovs[0]?.quantity || 0)} {unit?.abbreviation || 'unit'}
-                            </span>
-                            <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
-                              {trx.adjustment_reason || 'Opname'}
-                            </span>
+                      if (trxMovs.length > 1) {
+                        detailContent = (
+                          <div className="space-y-0.5">
+                            <div className="font-bold text-stone-900 flex items-center gap-1.5 flex-wrap">
+                              <span>⚖️ Penyesuaian: {trxMovs.length} Bahan Baku</span>
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border bg-purple-50 text-purple-800 border-purple-200">
+                                {trxMovs.length} Item Bahan
+                              </span>
+                              <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
+                                {trx.adjustment_reason || 'Opname'}
+                              </span>
+                            </div>
+                            {trx.notes && <p className="text-[11px] text-stone-500 italic">{trx.notes}</p>}
                           </div>
-                          {trx.notes && <p className="text-[11px] text-stone-500 italic">{trx.notes}</p>}
-                        </div>
-                      );
+                        );
+                      } else if (trxMovs.length === 1) {
+                        const m = trxMovs[0];
+                        const adjIng = ingredients.find((i) => i.id === m.ingredient_id || i.code === m.ingredient_id);
+                        const ingName = adjIng ? adjIng.name : 'Bahan';
+                        const unit = units.find((u) => u.id === adjIng?.unit_id);
+                        const moveType = m.type === 'in' ? '+' : '-';
+                        detailContent = (
+                          <div className="space-y-0.5">
+                            <div className="font-bold text-stone-900 flex items-center gap-1.5 flex-wrap">
+                              <span>⚖️ Penyesuaian: {ingName}</span>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                                m.type === 'in'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : 'bg-rose-50 text-rose-800 border-rose-200'
+                              }`}>
+                                {moveType}{formatNumber(m.quantity || 0)} {unit?.abbreviation || 'unit'}
+                              </span>
+                              <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
+                                {trx.adjustment_reason || 'Opname'}
+                              </span>
+                            </div>
+                            {trx.notes && <p className="text-[11px] text-stone-500 italic">{trx.notes}</p>}
+                          </div>
+                        );
+                      } else {
+                        detailContent = (
+                          <div className="space-y-0.5">
+                            <div className="font-bold text-stone-900 flex items-center gap-1.5 flex-wrap">
+                              <span>⚖️ Penyesuaian Stok</span>
+                              <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
+                                {trx.adjustment_reason || 'Opname'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-stone-500 italic">{trx.notes || 'Penyesuaian stok bahan'}</p>
+                          </div>
+                        );
+                      }
                     }
 
                     return (
