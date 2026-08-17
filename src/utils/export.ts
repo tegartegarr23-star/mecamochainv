@@ -153,3 +153,117 @@ export function exportLedgerToPDF(
 
   doc.save(`Mutasi_Stok_${ingredient.code}.pdf`);
 }
+
+/**
+ * Export Adjustment / Opname Report to Excel
+ */
+export function exportAdjustmentToExcel(
+  adjustments: Array<{
+    date: string;
+    refNo: string;
+    ingredientName: string;
+    ingredientCode: string;
+    category: string;
+    unit: string;
+    reason: string;
+    mode: string;
+    qty: number;
+    diff: number;
+    balanceAfter: number;
+    createdBy: string;
+    notes: string;
+  }>,
+  dateFilter: string
+) {
+  const exportData = adjustments.map((adj, index) => ({
+    No: index + 1,
+    'Tanggal & Jam': formatDate(adj.date, true),
+    'No. Referensi': adj.refNo,
+    'Kode Bahan': adj.ingredientCode,
+    'Nama Bahan': adj.ingredientName,
+    Kategori: adj.category,
+    Satuan: adj.unit,
+    Alasan: adj.reason,
+    'Mode Penyesuaian': adj.mode,
+    'Kuantitas (Qty)': adj.qty,
+    'Selisih (+/-)': adj.diff >= 0 ? `+${formatNumber(adj.diff)}` : formatNumber(adj.diff),
+    'Stok Sesudah': adj.balanceAfter,
+    'Petugas (User)': adj.createdBy,
+    Catatan: adj.notes,
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportData);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Penyesuaian & Opname');
+
+  const max_cols = Object.keys(exportData[0] || {}).length;
+  worksheet['!cols'] = Array(max_cols).fill({ wch: 18 });
+
+  XLSX.writeFile(workbook, `Laporan_Penyesuaian_Opname_${dateFilter || 'Semua'}.xlsx`);
+}
+
+/**
+ * Export Adjustment / Opname Report to PDF
+ */
+export function exportAdjustmentToPDF(
+  adjustments: Array<{
+    date: string;
+    refNo: string;
+    ingredientName: string;
+    ingredientCode: string;
+    category: string;
+    unit: string;
+    reason: string;
+    mode: string;
+    qty: number;
+    diff: number;
+    balanceAfter: number;
+    createdBy: string;
+    notes: string;
+  }>,
+  dateFilter: string
+) {
+  const doc = new jsPDF({ orientation: 'landscape' });
+
+  doc.setFontSize(16);
+  doc.text('MECAMOCHA F&B INVENTORY', 14, 15);
+  doc.setFontSize(12);
+  doc.text(`Laporan Penyesuaian & Stock Opname - Filter: ${dateFilter || 'Semua Periode'}`, 14, 22);
+
+  const tableColumn = [
+    'No',
+    'Tanggal',
+    'No. Ref',
+    'Kode & Bahan',
+    'Alasan',
+    'Mode',
+    'Qty / Selisih',
+    'Stok Akhir',
+    'Petugas',
+    'Catatan',
+  ];
+
+  const tableRows = adjustments.map((adj, i) => [
+    i + 1,
+    formatDate(adj.date, true),
+    adj.refNo,
+    `${adj.ingredientCode} - ${adj.ingredientName}`,
+    adj.reason,
+    adj.mode,
+    `${adj.diff >= 0 ? '+' : ''}${formatNumber(adj.diff)} ${adj.unit}`,
+    `${formatNumber(adj.balanceAfter)} ${adj.unit}`,
+    adj.createdBy,
+    adj.notes || '-',
+  ]);
+
+  autoTable(doc, {
+    head: [tableColumn],
+    body: tableRows,
+    startY: 28,
+    theme: 'grid',
+    headStyles: { fillColor: [109, 40, 217], textColor: 255 }, // Purple theme for Adjustments
+    styles: { fontSize: 8 },
+  });
+
+  doc.save(`Laporan_Penyesuaian_Opname_${dateFilter || 'Semua'}.pdf`);
+}

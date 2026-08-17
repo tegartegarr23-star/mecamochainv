@@ -14,6 +14,10 @@ import {
   TrendingUp,
   Utensils,
   CheckCircle2,
+  SlidersHorizontal,
+  AlertTriangle,
+  Layers,
+  ArrowUpDown,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
 import { SearchableIngredientSelect } from '../Common/SearchableIngredientSelect';
@@ -23,26 +27,68 @@ import {
   exportDailyStockToPDF,
   exportLedgerToExcel,
   exportLedgerToPDF,
+  exportAdjustmentToExcel,
+  exportAdjustmentToPDF,
 } from '../../utils/export';
 
 export const ReportsView: React.FC = () => {
-  const { ingredients, units, menus, transactions, getDailyStockReport, getIngredientLedger, pullFromSupabase, isSyncing } = useInventory();
+  const {
+    ingredients,
+    units,
+    categories,
+    menus,
+    transactions,
+    stockMovements,
+    getDailyStockReport,
+    getIngredientLedger,
+    pullFromSupabase,
+    isSyncing,
+  } = useInventory();
+
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Tab: Stock Report vs Ledger vs Sales Report
-  const [reportTab, setReportTab] = useState<'daily' | 'ledger' | 'sales'>('daily');
+  // Subtabs: 'daily' | 'adjustment' | 'ledger' | 'sales'
+  const [reportTab, setReportTab] = useState<'daily' | 'adjustment' | 'ledger' | 'sales'>('daily');
 
-  // Daily Report State
-  const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
+  // Helper for local YYYY-MM-DD
+  const getLocalTodayDate = (): string => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const getLocalDaysAgo = (days: number): string => {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const todayYMD = getLocalTodayDate();
+  const yesterdayYMD = getLocalDaysAgo(1);
+
+  // 1. Daily Report State
+  const [dailyDateMode, setDailyDateMode] = useState<'today' | 'yesterday' | 'all' | 'custom'>('today');
+  const [dailyCustomDate, setDailyCustomDate] = useState<string>(todayYMD);
   const [searchFilter, setSearchFilter] = useState('');
   const [dailyCategoryFilter, setDailyCategoryFilter] = useState<'all' | string>('all');
 
-  // Ledger State
+  // 2. Adjustment Report State
+  const [adjDateFilter, setAdjDateFilter] = useState<'all' | 'today' | 'yesterday' | 'custom'>('all');
+  const [adjCustomDate, setAdjCustomDate] = useState<string>(todayYMD);
+  const [adjReasonFilter, setAdjReasonFilter] = useState<string>('all');
+  const [adjSearchFilter, setAdjSearchFilter] = useState('');
+
+  // 3. Ledger State
   const [selectedIngredientId, setSelectedIngredientId] = useState(ingredients[0]?.id || '');
 
-  // Menu Sales Report State
+  // 4. Menu Sales Report State
   const [salesDateFilter, setSalesDateFilter] = useState<'all' | 'today' | 'yesterday' | 'custom'>('all');
-  const [salesCustomDate, setSalesCustomDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [salesCustomDate, setSalesCustomDate] = useState<string>(todayYMD);
   const [salesSearchFilter, setSalesSearchFilter] = useState('');
 
   const handleRefresh = async () => {
@@ -52,29 +98,36 @@ export const ReportsView: React.FC = () => {
   };
 
   const getYYYYMMDD = (input?: string | Date | null): string => {
-    if (!input) return new Date().toISOString().slice(0, 10);
+    if (!input) return todayYMD;
     if (typeof input === 'string') {
-      const matchIso = input.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      const trimmed = input.trim();
+      if (trimmed.includes('T')) {
+        const d = new Date(trimmed);
+        if (!isNaN(d.getTime())) {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        }
+      }
+      const matchIso = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
       if (matchIso) {
         return `${matchIso[1]}-${matchIso[2].padStart(2, '0')}-${matchIso[3].padStart(2, '0')}`;
+      }
+      const matchId = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+      if (matchId) {
+        return `${matchId[3]}-${matchId[2].padStart(2, '0')}-${matchId[1].padStart(2, '0')}`;
       }
     }
     const d = new Date(input);
     if (!isNaN(d.getTime())) {
-      const y = d.getUTCFullYear();
-      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-      const day = String(d.getUTCDate()).padStart(2, '0');
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
       return `${y}-${m}-${day}`;
     }
-    return new Date().toISOString().slice(0, 10);
+    return todayYMD;
   };
-
-  const todayYMD = getYYYYMMDD(new Date().toISOString());
-  const yesterdayYMD = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    return getYYYYMMDD(d.toISOString());
-  })();
 
   // Helper for category sorting priority: Kitchen = 1, Bar = 2, Others = 3
   const getCategoryPriority = (catName?: string) => {
@@ -85,7 +138,17 @@ export const ReportsView: React.FC = () => {
     return 3;
   };
 
-  const rawDailyReportData = getDailyStockReport(reportDate);
+  // Active Daily Report Date String for query
+  const effectiveDailyDate =
+    dailyDateMode === 'all'
+      ? 'all'
+      : dailyDateMode === 'today'
+      ? todayYMD
+      : dailyDateMode === 'yesterday'
+      ? yesterdayYMD
+      : dailyCustomDate || todayYMD;
+
+  const rawDailyReportData = getDailyStockReport(effectiveDailyDate);
 
   const dailyReportData = useMemo(() => {
     return rawDailyReportData
@@ -125,6 +188,186 @@ export const ReportsView: React.FC = () => {
       });
   }, [rawDailyReportData, searchFilter, dailyCategoryFilter]);
 
+  // Dedicated Adjustment / Opname Data Extraction
+  const adjustmentReportData = useMemo(() => {
+    const adjTrxs = transactions.filter((t) => {
+      if (!t) return false;
+      const tType = String(t.type || '').toLowerCase();
+      const notes = String(t.notes || '').toLowerCase();
+      return tType === 'adjustment' || notes.includes('penyesuaian') || notes.includes('opname');
+    });
+
+    const rows: Array<{
+      id: string;
+      date: string;
+      refNo: string;
+      ingredientId: string;
+      ingredientName: string;
+      ingredientCode: string;
+      category: string;
+      unit: string;
+      reason: string;
+      mode: string;
+      qty: number;
+      diff: number;
+      balanceAfter: number;
+      createdBy: string;
+      notes: string;
+    }> = [];
+
+    stockMovements.forEach((m) => {
+      if (!m || !m.ingredient_id) return;
+
+      const trx = transactions.find((t) => {
+        if (!t) return false;
+        if (m.transaction_id && String(t.id).trim().toLowerCase() === String(m.transaction_id).trim().toLowerCase()) {
+          return true;
+        }
+        if (t.reference_no && m.description && String(m.description).toLowerCase().includes(String(t.reference_no).toLowerCase())) {
+          return true;
+        }
+        return false;
+      });
+
+      const desc = m.description || '';
+      const descLower = desc.toLowerCase();
+      const trxType = trx?.type ? String(trx.type).toLowerCase() : '';
+
+      const isAdjMovement =
+        trxType === 'adjustment' ||
+        descLower.includes('penyesuaian') ||
+        descLower.includes('opname') ||
+        descLower.includes('adj') ||
+        descLower.includes('loss') ||
+        descLower.includes('damage') ||
+        descLower.includes('expired');
+
+      if (!isAdjMovement) return;
+
+      const mIngId = typeof m.ingredient_id === 'object' && m.ingredient_id !== null ? String((m.ingredient_id as any).id || '') : String(m.ingredient_id || '');
+      const ing = ingredients.find(
+        (i) =>
+          String(i.id).toLowerCase() === mIngId.toLowerCase() ||
+          String(i.code).toLowerCase() === mIngId.toLowerCase()
+      );
+      const unit = units.find((u) => u.id === ing?.unit_id) || ({ abbreviation: '-' } as any);
+      const cat = categories.find((c) => c.id === ing?.category_id) || ({ name: '-' } as any);
+
+      const mDate = trx?.transaction_date || m.created_at || trx?.created_at || new Date().toISOString();
+      const refNo = trx?.reference_no || (desc.match(/(?:TRX-)?ADJ-[A-Z0-9-]+/i)?.[0] || desc.match(/ADJ-\d+/i)?.[0] || '-');
+
+      let reason = trx?.adjustment_reason || 'Stock Opname';
+      if (descLower.includes('damage') || descLower.includes('rusak')) reason = 'Damage';
+      else if (descLower.includes('expired') || descLower.includes('kadaluwarsa')) reason = 'Expired';
+      else if (descLower.includes('loss') || descLower.includes('hilang')) reason = 'Loss';
+      else if (descLower.includes('opname') || descLower.includes('fisik')) reason = 'Stock Opname';
+
+      let mode = 'Set Stok Fisik';
+      if (descLower.includes('stock opname:')) {
+        mode = 'Stock Opname';
+      } else if (m.type === 'in') {
+        mode = 'Masuk (+)';
+      } else {
+        mode = 'Keluar (-)';
+      }
+
+      const qty = Number(m.quantity) || 0;
+      const diff = m.type === 'in' ? qty : -qty;
+
+      rows.push({
+        id: m.id,
+        date: mDate,
+        refNo,
+        ingredientId: ing?.id || mIngId,
+        ingredientName: ing?.name || 'Bahan Baku',
+        ingredientCode: ing?.code || '-',
+        category: cat.name || '-',
+        unit: unit.abbreviation || 'Unit',
+        reason,
+        mode,
+        qty,
+        diff,
+        balanceAfter: m.balance_after !== undefined && m.balance_after !== null ? Number(m.balance_after) : (ing?.current_stock || 0),
+        createdBy: trx?.created_by || 'Admin',
+        notes: trx?.notes || desc,
+      });
+    });
+
+    // Also include any adjustment transactions that don't have direct movements in stockMovements
+    adjTrxs.forEach((trx) => {
+      const alreadyIncluded = rows.some(
+        (r) => r.refNo === trx.reference_no || r.id.includes(trx.id)
+      );
+      if (!alreadyIncluded) {
+        const trxDate = trx.transaction_date || trx.created_at || new Date().toISOString();
+        rows.push({
+          id: trx.id,
+          date: trxDate,
+          refNo: trx.reference_no || 'TRX-ADJ',
+          ingredientId: 'all',
+          ingredientName: 'Penyesuaian Multi Bahan',
+          ingredientCode: '-',
+          category: 'Kitchen / Bar',
+          unit: 'Item',
+          reason: trx.adjustment_reason || 'Stock Opname',
+          mode: 'Penyesuaian',
+          qty: 0,
+          diff: 0,
+          balanceAfter: 0,
+          createdBy: trx.created_by || 'Admin',
+          notes: trx.notes || 'Penyesuaian Stok',
+        });
+      }
+    });
+
+    return rows
+      .filter((r) => {
+        // Date filter
+        const rYMD = getYYYYMMDD(r.date);
+        if (adjDateFilter === 'today' && rYMD !== todayYMD) return false;
+        if (adjDateFilter === 'yesterday' && rYMD !== yesterdayYMD) return false;
+        if (adjDateFilter === 'custom' && adjCustomDate && rYMD !== adjCustomDate) return false;
+
+        // Reason filter
+        if (adjReasonFilter !== 'all') {
+          if (r.reason.toLowerCase() !== adjReasonFilter.toLowerCase()) return false;
+        }
+
+        // Search filter
+        if (adjSearchFilter.trim()) {
+          const q = adjSearchFilter.toLowerCase();
+          return (
+            r.ingredientName.toLowerCase().includes(q) ||
+            r.ingredientCode.toLowerCase().includes(q) ||
+            r.refNo.toLowerCase().includes(q) ||
+            r.notes.toLowerCase().includes(q) ||
+            r.category.toLowerCase().includes(q)
+          );
+        }
+
+        return true;
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [
+    transactions,
+    stockMovements,
+    ingredients,
+    units,
+    categories,
+    adjDateFilter,
+    adjCustomDate,
+    adjReasonFilter,
+    adjSearchFilter,
+    todayYMD,
+    yesterdayYMD,
+  ]);
+
+  // Adjustment stats
+  const adjTotalCount = adjustmentReportData.length;
+  const adjTotalPlus = adjustmentReportData.filter((r) => r.diff > 0).reduce((acc, r) => acc + r.qty, 0);
+  const adjTotalMinus = adjustmentReportData.filter((r) => r.diff < 0).reduce((acc, r) => acc + r.qty, 0);
+
+  // Selected Ingredient for Ledger
   const selectedIngredient = ingredients.find((i) => i.id === selectedIngredientId) || ingredients[0];
   const selectedUnit = units.find((u) => u.id === selectedIngredient?.unit_id) || ({ name: '-', abbreviation: '-' } as any);
   const ledgerMovements = getIngredientLedger(selectedIngredientId);
@@ -133,7 +376,6 @@ export const ReportsView: React.FC = () => {
   const menuSalesData = useMemo(() => {
     const map = new Map<string, { menuName: string; category: string; price: number; totalPortions: number; totalTrx: number; revenue: number }>();
 
-    // Pre-populate with registered menus
     menus.forEach((m) => {
       map.set(m.id, {
         menuName: m.name,
@@ -153,9 +395,18 @@ export const ReportsView: React.FC = () => {
       if (salesDateFilter === 'yesterday' && tYMD !== yesterdayYMD) return;
       if (salesDateFilter === 'custom' && salesCustomDate && tYMD !== salesCustomDate) return;
 
-      const primaryMenuId = t.menu_id;
-      if (primaryMenuId && map.has(primaryMenuId)) {
-        const entry = map.get(primaryMenuId)!;
+      if (Array.isArray(t.production_items) && t.production_items.length > 0) {
+        t.production_items.forEach((pItem) => {
+          if (pItem.menu_id && map.has(pItem.menu_id)) {
+            const entry = map.get(pItem.menu_id)!;
+            const portions = Number(pItem.portion_count) || 1;
+            entry.totalPortions += portions;
+            entry.totalTrx += 1;
+            entry.revenue += portions * entry.price;
+          }
+        });
+      } else if (t.menu_id && map.has(t.menu_id)) {
+        const entry = map.get(t.menu_id)!;
         const portions = Number(t.portion_count) || 1;
         entry.totalPortions += portions;
         entry.totalTrx += 1;
@@ -163,16 +414,19 @@ export const ReportsView: React.FC = () => {
       }
     });
 
-    return Array.from(map.entries()).map(([id, data]) => ({
-      id,
-      ...data,
-    })).filter((item) => {
-      if (salesSearchFilter.trim()) {
-        const q = salesSearchFilter.toLowerCase();
-        return item.menuName.toLowerCase().includes(q) || item.category.toLowerCase().includes(q);
-      }
-      return true;
-    }).sort((a, b) => b.totalPortions - a.totalPortions);
+    return Array.from(map.entries())
+      .map(([id, data]) => ({
+        id,
+        ...data,
+      }))
+      .filter((item) => {
+        if (salesSearchFilter.trim()) {
+          const q = salesSearchFilter.toLowerCase();
+          return item.menuName.toLowerCase().includes(q) || item.category.toLowerCase().includes(q);
+        }
+        return true;
+      })
+      .sort((a, b) => b.totalPortions - a.totalPortions);
   }, [menus, transactions, salesDateFilter, salesCustomDate, salesSearchFilter, todayYMD, yesterdayYMD]);
 
   const totalPortionsAll = menuSalesData.reduce((sum, item) => sum + item.totalPortions, 0);
@@ -192,7 +446,17 @@ export const ReportsView: React.FC = () => {
                 : 'bg-stone-50 text-stone-700 hover:bg-stone-100 border border-stone-200'
             }`}
           >
-            <FileSpreadsheet className="w-4 h-4" /> Laporan Stok Harian (Daily Report)
+            <FileSpreadsheet className="w-4 h-4" /> Laporan Stok Harian
+          </button>
+          <button
+            onClick={() => setReportTab('adjustment')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              reportTab === 'adjustment'
+                ? 'bg-purple-800 text-white shadow-sm'
+                : 'bg-purple-50 text-purple-800 hover:bg-purple-100 border border-purple-200'
+            }`}
+          >
+            <SlidersHorizontal className="w-4 h-4" /> Laporan Penyesuaian & Opname
           </button>
           <button
             onClick={() => setReportTab('ledger')}
@@ -202,7 +466,7 @@ export const ReportsView: React.FC = () => {
                 : 'bg-stone-50 text-stone-700 hover:bg-stone-100 border border-stone-200'
             }`}
           >
-            <BookOpen className="w-4 h-4" /> Mutasi Stok (Stock Ledger)
+            <BookOpen className="w-4 h-4" /> Mutasi Stok (Ledger)
           </button>
           <button
             onClick={() => setReportTab('sales')}
@@ -231,26 +495,74 @@ export const ReportsView: React.FC = () => {
       {reportTab === 'daily' && (
         <div className="space-y-4">
           {/* Controls Bar */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-stone-200 shadow-xs">
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-stone-200 shadow-xs">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 bg-stone-50 px-3 py-1.5 rounded-xl border border-stone-200">
-                <Calendar className="w-4 h-4 text-stone-500" />
-                <span className="text-xs font-semibold text-stone-700">Tanggal:</span>
-                <input
-                  type="date"
-                  value={reportDate}
-                  onChange={(e) => setReportDate(e.target.value)}
-                  className="text-xs font-bold text-stone-900 bg-transparent focus:outline-none"
-                />
+              {/* Date Filters Quick Select */}
+              <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200">
+                <span className="text-[11px] font-bold text-stone-500 px-2 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5" /> Tanggal:
+                </span>
+                <button
+                  onClick={() => setDailyDateMode('today')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    dailyDateMode === 'today'
+                      ? 'bg-amber-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Hari Ini ({formatDate(todayYMD)})
+                </button>
+                <button
+                  onClick={() => setDailyDateMode('yesterday')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    dailyDateMode === 'yesterday'
+                      ? 'bg-amber-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Kemarin
+                </button>
+                <button
+                  onClick={() => setDailyDateMode('all')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    dailyDateMode === 'all'
+                      ? 'bg-amber-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Semua Tanggal (Akumulasi)
+                </button>
+                <button
+                  onClick={() => setDailyDateMode('custom')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    dailyDateMode === 'custom'
+                      ? 'bg-amber-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Pilih Tanggal
+                </button>
               </div>
+
+              {dailyDateMode === 'custom' && (
+                <div className="flex items-center gap-2 bg-stone-50 px-3 py-1.5 rounded-xl border border-amber-300 ring-2 ring-amber-100">
+                  <input
+                    type="date"
+                    value={dailyCustomDate}
+                    onChange={(e) => setDailyCustomDate(e.target.value)}
+                    className="text-xs font-bold text-stone-900 bg-transparent focus:outline-none"
+                  />
+                </div>
+              )}
 
               {/* Category Filter Pills */}
               <div className="flex items-center gap-1 bg-stone-50 p-1 rounded-xl border border-stone-200">
+                <span className="text-[11px] font-bold text-stone-400 px-2">Kategori:</span>
                 <button
                   onClick={() => setDailyCategoryFilter('all')}
-                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
                     dailyCategoryFilter === 'all'
-                      ? 'bg-amber-800 text-white shadow-xs'
+                      ? 'bg-stone-800 text-white shadow-xs'
                       : 'text-stone-600 hover:text-stone-900'
                   }`}
                 >
@@ -258,7 +570,7 @@ export const ReportsView: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setDailyCategoryFilter('kitchen')}
-                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
                     dailyCategoryFilter === 'kitchen'
                       ? 'bg-amber-800 text-white shadow-xs'
                       : 'text-stone-600 hover:text-stone-900'
@@ -268,9 +580,9 @@ export const ReportsView: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setDailyCategoryFilter('bar')}
-                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
                     dailyCategoryFilter === 'bar'
-                      ? 'bg-amber-800 text-white shadow-xs'
+                      ? 'bg-blue-800 text-white shadow-xs'
                       : 'text-stone-600 hover:text-stone-900'
                   }`}
                 >
@@ -278,11 +590,12 @@ export const ReportsView: React.FC = () => {
                 </button>
               </div>
 
-              <div className="relative flex-1 min-w-48">
+              {/* Search filter */}
+              <div className="relative min-w-44">
                 <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Cari bahan..."
+                  placeholder="Cari kode / nama bahan..."
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
                   className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
@@ -291,7 +604,7 @@ export const ReportsView: React.FC = () => {
             </div>
 
             {/* Export & Refresh Buttons */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={handleRefresh}
                 disabled={isRefreshing || isSyncing}
@@ -300,13 +613,13 @@ export const ReportsView: React.FC = () => {
                 <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing || isSyncing ? 'animate-spin' : ''}`} /> Refresh
               </button>
               <button
-                onClick={() => exportDailyStockToExcel(dailyReportData, reportDate)}
+                onClick={() => exportDailyStockToExcel(dailyReportData, effectiveDailyDate)}
                 className="flex items-center gap-1.5 px-3 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all"
               >
                 <Download className="w-3.5 h-3.5" /> Export Excel
               </button>
               <button
-                onClick={() => exportDailyStockToPDF(dailyReportData, reportDate)}
+                onClick={() => exportDailyStockToPDF(dailyReportData, effectiveDailyDate)}
                 className="flex items-center gap-1.5 px-3 py-2 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all"
               >
                 <FileText className="w-3.5 h-3.5" /> Export PDF
@@ -314,7 +627,20 @@ export const ReportsView: React.FC = () => {
             </div>
           </div>
 
-          {/* Table */}
+          {/* Active Filter Notification Bar */}
+          <div className="flex items-center justify-between px-4 py-2 bg-amber-50/70 border border-amber-200 rounded-xl text-xs text-amber-900 font-medium">
+            <span>
+              Menampilkan Laporan Stok untuk tanggal:{' '}
+              <strong className="font-bold">
+                {dailyDateMode === 'all' ? 'Semua Tanggal (Total Akumulasi Transaksi)' : formatDate(effectiveDailyDate)}
+              </strong>
+            </span>
+            <span className="text-[11px] text-amber-700">
+              Total {dailyReportData.length} bahan baku
+            </span>
+          </div>
+
+          {/* Daily Report Table */}
           <div className="bg-white rounded-2xl border border-stone-200 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -334,62 +660,320 @@ export const ReportsView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100 font-mono">
-                  {dailyReportData.map((row) => {
-                    const catName = row.category?.name || '-';
-                    const isKitchen = catName.toLowerCase().includes('kitchen') || catName.toLowerCase().includes('dapur');
-                    const isBar = catName.toLowerCase().includes('bar') || catName.toLowerCase().includes('minuman');
-
-                    return (
-                      <tr key={row.ingredient.id} className="hover:bg-stone-50">
-                        <td className="p-3 font-semibold text-stone-700">{row.ingredient.code}</td>
-                        <td className="p-3 font-sans font-bold text-stone-900">{row.ingredient.name}</td>
-                        <td className="p-3 font-sans">
-                          <span
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
-                              isKitchen
-                                ? 'bg-amber-100 text-amber-900 border-amber-300'
-                                : isBar
-                                ? 'bg-blue-100 text-blue-900 border-blue-300'
-                                : 'bg-stone-100 text-stone-700 border-stone-300'
-                            }`}
-                          >
-                            {catName}
-                          </span>
-                        </td>
-                        <td className="p-3 font-sans text-stone-600">{row.unit?.abbreviation || '-'}</td>
-                      <td className="p-3 text-right font-medium text-stone-600">
-                        {formatNumber(row.initial_stock)}
-                      </td>
-                      <td className="p-3 text-right font-bold text-emerald-700 bg-emerald-50/20">
-                        +{formatNumber(row.in_purchase)}
-                      </td>
-                      <td className="p-3 text-right font-bold text-blue-700 bg-blue-50/20">
-                        +{formatNumber(row.in_prepare)}
-                      </td>
-                      <td className="p-3 text-right font-bold text-rose-700 bg-blue-50/20">
-                        -{formatNumber(row.out_prepare)}
-                      </td>
-                      <td className="p-3 text-right font-bold text-rose-700 bg-amber-50/20">
-                        -{formatNumber(row.out_production)}
-                      </td>
-                      <td className="p-3 text-right font-semibold text-purple-800 bg-purple-50/20">
-                        {row.in_adjustment - row.out_adjustment >= 0 ? '+' : ''}
-                        {formatNumber(row.in_adjustment - row.out_adjustment)}
-                      </td>
-                      <td className={`p-3 text-right font-extrabold ${row.final_stock < 0 ? 'text-red-600 bg-rose-50 font-mono' : 'text-stone-900 bg-stone-50'}`}>
-                        {formatNumber(row.final_stock)}
+                  {dailyReportData.length === 0 ? (
+                    <tr>
+                      <td colSpan={11} className="p-8 text-center text-stone-500 font-sans italic">
+                        Tidak ada data bahan baku yang cocok dengan filter.
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
+                  ) : (
+                    dailyReportData.map((row) => {
+                      const catName = row.category?.name || '-';
+                      const isKitchen = catName.toLowerCase().includes('kitchen') || catName.toLowerCase().includes('dapur');
+                      const isBar = catName.toLowerCase().includes('bar') || catName.toLowerCase().includes('minuman');
+                      const adjVal = row.in_adjustment - row.out_adjustment;
+
+                      return (
+                        <tr key={row.ingredient.id} className="hover:bg-stone-50 transition-colors">
+                          <td className="p-3 font-semibold text-stone-700">{row.ingredient.code}</td>
+                          <td className="p-3 font-sans font-bold text-stone-900">{row.ingredient.name}</td>
+                          <td className="p-3 font-sans">
+                            <span
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                isKitchen
+                                  ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                  : isBar
+                                  ? 'bg-blue-100 text-blue-900 border-blue-300'
+                                  : 'bg-stone-100 text-stone-700 border-stone-300'
+                              }`}
+                            >
+                              {catName}
+                            </span>
+                          </td>
+                          <td className="p-3 font-sans text-stone-600">{row.unit?.abbreviation || '-'}</td>
+                          <td className="p-3 text-right font-medium text-stone-600">
+                            {formatNumber(row.initial_stock)}
+                          </td>
+                          <td className="p-3 text-right font-bold text-emerald-700 bg-emerald-50/20">
+                            +{formatNumber(row.in_purchase)}
+                          </td>
+                          <td className="p-3 text-right font-bold text-blue-700 bg-blue-50/20">
+                            +{formatNumber(row.in_prepare)}
+                          </td>
+                          <td className="p-3 text-right font-bold text-rose-700 bg-blue-50/20">
+                            -{formatNumber(row.out_prepare)}
+                          </td>
+                          <td className="p-3 text-right font-bold text-rose-700 bg-amber-50/20">
+                            -{formatNumber(row.out_production)}
+                          </td>
+                          <td
+                            className={`p-3 text-right font-bold ${
+                              adjVal > 0
+                                ? 'text-purple-700 bg-purple-50/40'
+                                : adjVal < 0
+                                ? 'text-rose-700 bg-rose-50/40'
+                                : 'text-stone-500 bg-stone-50/20'
+                            }`}
+                          >
+                            {adjVal > 0 ? `+${formatNumber(adjVal)}` : adjVal < 0 ? formatNumber(adjVal) : '+0'}
+                          </td>
+                          <td className={`p-3 text-right font-extrabold ${row.final_stock < 0 ? 'text-red-600 bg-rose-50 font-mono' : 'text-stone-900 bg-stone-50'}`}>
+                            {formatNumber(row.final_stock)}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
               </table>
             </div>
           </div>
         </div>
       )}
 
-      {/* REPORT 2: STOCK LEDGER */}
+      {/* REPORT 2: ADJUSTMENT & OPNAME REPORT */}
+      {reportTab === 'adjustment' && (
+        <div className="space-y-6">
+          {/* Summary Metric Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs flex items-center gap-4">
+              <div className="p-3 bg-purple-100 text-purple-800 rounded-xl">
+                <SlidersHorizontal className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs text-stone-500 font-medium">Total Item Penyesuaian</span>
+                <div className="text-2xl font-extrabold text-purple-900 font-mono mt-0.5">
+                  {formatNumber(adjTotalCount)} <span className="text-xs font-sans text-stone-500">item</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs flex items-center gap-4">
+              <div className="p-3 bg-emerald-100 text-emerald-800 rounded-xl">
+                <ArrowDownRight className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs text-stone-500 font-medium">Penyesuaian Masuk (+)</span>
+                <div className="text-2xl font-extrabold text-emerald-800 font-mono mt-0.5">
+                  +{formatNumber(adjTotalPlus)}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs flex items-center gap-4">
+              <div className="p-3 bg-rose-100 text-rose-800 rounded-xl">
+                <ArrowUpRight className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs text-stone-500 font-medium">Penyesuaian Keluar (-)</span>
+                <div className="text-2xl font-extrabold text-rose-800 font-mono mt-0.5">
+                  -{formatNumber(adjTotalMinus)}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs flex items-center gap-4">
+              <div className="p-3 bg-amber-100 text-amber-800 rounded-xl">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs text-stone-500 font-medium">Status Audit Stok</span>
+                <div className="text-sm font-bold text-amber-900 mt-1">
+                  Sinkron Cloud Aktif
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Controls Bar */}
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-stone-200 shadow-xs">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Date Filters */}
+              <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200">
+                <span className="text-[11px] font-bold text-stone-500 px-2 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5" /> Tanggal:
+                </span>
+                <button
+                  onClick={() => setAdjDateFilter('all')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    adjDateFilter === 'all'
+                      ? 'bg-purple-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Semua Tanggal
+                </button>
+                <button
+                  onClick={() => setAdjDateFilter('today')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    adjDateFilter === 'today'
+                      ? 'bg-purple-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Hari Ini
+                </button>
+                <button
+                  onClick={() => setAdjDateFilter('yesterday')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    adjDateFilter === 'yesterday'
+                      ? 'bg-purple-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Kemarin
+                </button>
+                <button
+                  onClick={() => setAdjDateFilter('custom')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    adjDateFilter === 'custom'
+                      ? 'bg-purple-800 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Pilih Tanggal
+                </button>
+              </div>
+
+              {adjDateFilter === 'custom' && (
+                <input
+                  type="date"
+                  value={adjCustomDate}
+                  onChange={(e) => setAdjCustomDate(e.target.value)}
+                  className="px-3 py-1.5 bg-stone-50 border border-purple-300 ring-2 ring-purple-100 rounded-xl text-xs font-bold focus:outline-none"
+                />
+              )}
+
+              {/* Reason Filter */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-stone-600">Alasan:</span>
+                <select
+                  value={adjReasonFilter}
+                  onChange={(e) => setAdjReasonFilter(e.target.value)}
+                  className="px-3 py-1.5 text-xs font-bold rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
+                >
+                  <option value="all">Semua Alasan</option>
+                  <option value="Stock Opname">Stock Opname</option>
+                  <option value="Damage">Damage (Kerusakan)</option>
+                  <option value="Expired">Expired (Kadaluwarsa)</option>
+                  <option value="Loss">Loss (Kehilangan)</option>
+                  <option value="Other">Lainnya</option>
+                </select>
+              </div>
+
+              {/* Search input */}
+              <div className="relative min-w-44">
+                <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Cari bahan, ref, catatan..."
+                  value={adjSearchFilter}
+                  onChange={(e) => setAdjSearchFilter(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl bg-stone-50 border border-stone-200 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Export Buttons */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => exportAdjustmentToExcel(adjustmentReportData, adjDateFilter === 'custom' ? adjCustomDate : adjDateFilter)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all"
+              >
+                <Download className="w-3.5 h-3.5" /> Export Excel
+              </button>
+              <button
+                onClick={() => exportAdjustmentToPDF(adjustmentReportData, adjDateFilter === 'custom' ? adjCustomDate : adjDateFilter)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all"
+              >
+                <FileText className="w-3.5 h-3.5" /> Export PDF
+              </button>
+            </div>
+          </div>
+
+          {/* Adjustment Report Table */}
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-stone-50 text-stone-700 font-semibold border-b border-stone-200">
+                  <tr>
+                    <th className="p-3.5">Tanggal & Jam</th>
+                    <th className="p-3.5">No. Referensi</th>
+                    <th className="p-3.5">Bahan Baku</th>
+                    <th className="p-3.5">Kategori</th>
+                    <th className="p-3.5">Alasan</th>
+                    <th className="p-3.5">Mode</th>
+                    <th className="p-3.5 text-right">Selisih (+/-)</th>
+                    <th className="p-3.5 text-right">Stok Sesudah</th>
+                    <th className="p-3.5">Petugas</th>
+                    <th className="p-3.5">Catatan / Detail</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100 font-mono">
+                  {adjustmentReportData.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="p-8 text-center text-stone-500 font-sans italic">
+                        Belum ada riwayat transaksi penyesuaian atau stock opname pada filter ini.
+                      </td>
+                    </tr>
+                  ) : (
+                    adjustmentReportData.map((adj) => {
+                      const reasonBadgeColor =
+                        adj.reason === 'Stock Opname'
+                          ? 'bg-purple-100 text-purple-800 border-purple-200'
+                          : adj.reason === 'Damage'
+                          ? 'bg-rose-100 text-rose-800 border-rose-200'
+                          : adj.reason === 'Expired'
+                          ? 'bg-orange-100 text-orange-800 border-orange-200'
+                          : adj.reason === 'Loss'
+                          ? 'bg-amber-100 text-amber-900 border-amber-200'
+                          : 'bg-stone-100 text-stone-800 border-stone-200';
+
+                      return (
+                        <tr key={adj.id} className="hover:bg-stone-50 transition-colors">
+                          <td className="p-3.5 text-stone-600 font-sans">{formatDate(adj.date, true)}</td>
+                          <td className="p-3.5 font-bold text-stone-800">{adj.refNo}</td>
+                          <td className="p-3.5 font-sans">
+                            <span className="font-bold text-stone-900 block">{adj.ingredientName}</span>
+                            <span className="text-[10px] text-stone-400 font-mono">{adj.ingredientCode}</span>
+                          </td>
+                          <td className="p-3.5 font-sans text-stone-600">{adj.category}</td>
+                          <td className="p-3.5 font-sans">
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${reasonBadgeColor}`}>
+                              {adj.reason}
+                            </span>
+                          </td>
+                          <td className="p-3.5 font-sans">
+                            <span className="text-[11px] font-semibold text-stone-700">
+                              {adj.mode}
+                            </span>
+                          </td>
+                          <td
+                            className={`p-3.5 text-right font-extrabold ${
+                              adj.diff > 0 ? 'text-emerald-700 bg-emerald-50/30' : adj.diff < 0 ? 'text-rose-700 bg-rose-50/30' : 'text-stone-600'
+                            }`}
+                          >
+                            {adj.diff > 0 ? `+${formatNumber(adj.diff)}` : formatNumber(adj.diff)} {adj.unit}
+                          </td>
+                          <td className="p-3.5 text-right font-extrabold text-stone-900">
+                            {formatNumber(adj.balanceAfter)} {adj.unit}
+                          </td>
+                          <td className="p-3.5 font-sans text-stone-600">{adj.createdBy}</td>
+                          <td className="p-3.5 font-sans text-stone-600 max-w-xs truncate" title={adj.notes}>
+                            {adj.notes || '-'}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REPORT 3: STOCK LEDGER */}
       {reportTab === 'ledger' && (
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-stone-200 shadow-xs">
@@ -462,7 +1046,7 @@ export const ReportsView: React.FC = () => {
                   ) : (
                     ledgerMovements.map((m) => (
                       <tr key={m.id} className="hover:bg-stone-50">
-                        <td className="p-3.5 text-stone-600">{formatDate(m.created_at, true)}</td>
+                        <td className="p-3.5 text-stone-600 font-sans">{formatDate(m.created_at, true)}</td>
                         <td className="p-3.5 font-sans">
                           {m.type === 'in' ? (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">
@@ -496,7 +1080,7 @@ export const ReportsView: React.FC = () => {
         </div>
       )}
 
-      {/* REPORT 3: MENU SALES REPORT */}
+      {/* REPORT 4: MENU SALES REPORT */}
       {reportTab === 'sales' && (
         <div className="space-y-6">
           {/* Summary Cards */}

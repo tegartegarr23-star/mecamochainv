@@ -58,10 +58,29 @@ export function formatDate(dateString: string, includeTime: boolean = false): st
 }
 
 /**
- * Generates transaction reference number e.g. TRX-PUR-20260801-001
+ * Generates transaction reference number e.g. TRX-PUR-20260816-001 using local date
  */
-export function generateRefNo(prefix: string): string {
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+export function generateRefNo(prefix: string, dateInput?: string | Date): string {
+  let d: Date;
+  if (dateInput) {
+    if (typeof dateInput === 'string') {
+      const match = dateInput.match(/^(\d{4})[-/]?(\d{2})[-/]?(\d{2})/);
+      if (match) {
+        const dateStr = `${match[1]}${match[2]}${match[3]}`;
+        const randomSuffix = Math.floor(100 + Math.random() * 900);
+        return `TRX-${prefix}-${dateStr}-${randomSuffix}`;
+      }
+    }
+    d = new Date(dateInput);
+    if (isNaN(d.getTime())) d = new Date();
+  } else {
+    d = new Date();
+  }
+
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const dateStr = `${y}${m}${day}`;
   const randomSuffix = Math.floor(100 + Math.random() * 900);
   return `TRX-${prefix}-${dateStr}-${randomSuffix}`;
 }

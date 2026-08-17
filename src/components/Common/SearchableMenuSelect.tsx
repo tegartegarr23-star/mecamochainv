@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, ChevronDown, Check, X, Utensils } from 'lucide-react';
+import { Search, ChevronDown, Check, X } from 'lucide-react';
 import { Menu } from '../../types';
-import { formatCurrency } from '../../utils/formatters';
 
 interface SearchableMenuSelectProps {
   menus: Menu[];
@@ -22,7 +21,6 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [catFilter, setCatFilter] = useState('all');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -33,76 +31,19 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
     return menus.find((m) => m.id === value || m.name.toLowerCase() === value.toLowerCase());
   }, [menus, value]);
 
-  // Extract unique categories dynamically from menus
-  const dynamicCategories = useMemo(() => {
-    const cats = new Set<string>();
-    menus.forEach((m) => {
-      if (m.category && m.category.trim()) {
-        cats.add(m.category.trim());
-      }
-    });
-    cats.add('Kitchen');
-    cats.add('Bar');
-
-    const getCatPriority = (cat: string) => {
-      const lower = cat.toLowerCase();
-      if (lower.includes('kitchen') || lower.includes('dapur')) return 1;
-      if (lower.includes('bar') || lower.includes('minuman')) return 2;
-      return 3;
-    };
-
-    return Array.from(cats).sort((a, b) => {
-      const pA = getCatPriority(a);
-      const pB = getCatPriority(b);
-      if (pA !== pB) return pA - pB;
-      return a.localeCompare(b, 'id', { sensitivity: 'base' });
-    });
-  }, [menus]);
-
-  // Filter and sort menus
+  // Filter and sort menus purely by name
   const filteredMenus = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
     return menus
       .filter((m) => {
-        // Search query filter (matches name or category)
-        if (q) {
-          const matchName = m.name.toLowerCase().includes(q);
-          const matchCat = m.category.toLowerCase().includes(q);
-          if (!matchName && !matchCat) return false;
-        }
-
-        // Category filter
-        if (catFilter !== 'all') {
-          const cLower = m.category.toLowerCase();
-          if (catFilter.toLowerCase() === 'kitchen') {
-            return (
-              cLower.includes('kitchen') ||
-              cLower.includes('dapur') ||
-              cLower.includes('food') ||
-              cLower.includes('snack') ||
-              cLower.includes('main')
-            );
-          }
-          if (catFilter.toLowerCase() === 'bar') {
-            return (
-              cLower.includes('bar') ||
-              cLower.includes('beverage') ||
-              cLower.includes('minuman') ||
-              cLower.includes('drink') ||
-              cLower.includes('kopi') ||
-              cLower.includes('coffee')
-            );
-          }
-          return cLower === catFilter.toLowerCase();
-        }
-
-        return true;
+        if (!q) return true;
+        return m.name.toLowerCase().includes(q) || (m.category && m.category.toLowerCase().includes(q));
       })
       .sort((a, b) => {
         return a.name.localeCompare(b.name, 'id', { sensitivity: 'base', numeric: true });
       });
-  }, [menus, searchQuery, catFilter]);
+  }, [menus, searchQuery]);
 
   // Reset highlight index when filtered list changes
   useEffect(() => {
@@ -167,10 +108,10 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
               setTimeout(() => inputRef.current?.focus(), 50);
             }
           }}
-          className={`flex items-center justify-between gap-2 px-3 py-2 text-xs rounded-xl border transition-all cursor-pointer bg-white ${
+          className={`flex items-center justify-between gap-2 px-3.5 py-2.5 text-xs rounded-xl border transition-all cursor-pointer bg-white ${
             disabled
               ? 'bg-stone-100 border-stone-200 cursor-not-allowed opacity-60'
-              : 'border-amber-300 hover:border-amber-500 hover:bg-amber-50/40 shadow-xs'
+              : 'border-amber-300 hover:border-amber-500 hover:bg-amber-50/30 shadow-xs'
           }`}
         >
           <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -209,7 +150,7 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
               inputRef.current?.focus();
             }
           }}
-          className={`flex items-center gap-2 px-3 py-2 text-xs rounded-xl border transition-all bg-white cursor-text ${
+          className={`flex items-center gap-2 px-3.5 py-2.5 text-xs rounded-xl border transition-all bg-white cursor-text ${
             disabled
               ? 'bg-stone-100 border-stone-200 cursor-not-allowed opacity-60'
               : isOpen
@@ -224,14 +165,14 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
             type="text"
             disabled={disabled}
             value={searchQuery}
-            placeholder={selectedMenu ? `Ganti "${selectedMenu.name}"...` : placeholder}
+            placeholder={selectedMenu ? selectedMenu.name : placeholder}
             onFocus={() => setIsOpen(true)}
             onChange={(e) => {
               setSearchQuery(e.target.value);
               if (!isOpen) setIsOpen(true);
             }}
             onKeyDown={handleKeyDown}
-            className="flex-1 min-w-0 bg-transparent font-bold text-stone-900 placeholder:text-stone-400 placeholder:font-normal focus:outline-none text-xs"
+            className="flex-1 min-w-0 bg-transparent font-bold text-stone-900 placeholder:text-stone-400 placeholder:font-normal focus:outline-none text-sm"
           />
 
           {searchQuery && !disabled && (
@@ -266,73 +207,23 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
         </div>
       )}
 
-      {/* Floating Suggestions List with wide and clear dropdown */}
+      {/* Floating Suggestions List - Clean Menu Names only */}
       {isOpen && (
         <div
           ref={listRef}
-          className="absolute left-0 top-full mt-1.5 z-50 bg-white rounded-2xl border border-stone-300 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 w-[320px] sm:w-[420px] md:w-[480px] max-w-[95vw]"
+          className="absolute left-0 top-full mt-1.5 z-50 bg-white rounded-2xl border border-stone-300 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100 w-full min-w-[280px] max-w-[95vw]"
           onMouseDown={(e) => e.stopPropagation()}
         >
-          {/* Quick Category Filter Pills */}
-          <div className="p-3 border-b border-stone-200 bg-stone-50 space-y-2">
-            <div className="flex items-center justify-between text-xs px-1 text-stone-600 font-semibold">
-              <span className="flex items-center gap-1.5 text-stone-700 font-bold">
-                <Utensils className="w-3.5 h-3.5 text-amber-700" /> Pilih Kategori:
-              </span>
-              <span className="text-[11px] font-bold text-stone-500 bg-stone-200/80 px-2 py-0.5 rounded-full">
-                {filteredMenus.length} menu
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-              <button
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  setCatFilter('all');
-                }}
-                className={`px-3 py-1 text-xs font-bold rounded-lg shrink-0 transition-all cursor-pointer ${
-                  catFilter === 'all'
-                    ? 'bg-amber-800 text-white shadow-xs'
-                    : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-300'
-                }`}
-              >
-                Semua ({menus.length})
-              </button>
-              {dynamicCategories.map((cat) => {
-                const count = menus.filter((m) => m.category?.toLowerCase() === cat.toLowerCase()).length;
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      setCatFilter(cat);
-                    }}
-                    className={`px-3 py-1 text-xs font-bold rounded-lg shrink-0 transition-all cursor-pointer ${
-                      catFilter === cat
-                        ? 'bg-amber-800 text-white shadow-xs'
-                        : 'bg-white text-stone-700 hover:bg-stone-100 border border-stone-300'
-                    }`}
-                  >
-                    {cat} {count > 0 ? `(${count})` : ''}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* List Options (Alphabetical A-Z, wide & clear) */}
+          {/* List Options (Alphabetical A-Z, Clean Name display) */}
           <div className="max-h-72 overflow-y-auto divide-y divide-stone-100 p-1.5">
             {filteredMenus.length === 0 ? (
-              <div className="p-6 text-center text-xs text-stone-500 font-medium italic space-y-2">
+              <div className="p-5 text-center text-xs text-stone-500 font-medium italic space-y-2">
                 <p>Menu "{searchQuery}" tidak ditemukan</p>
                 <button
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault();
                     setSearchQuery('');
-                    setCatFilter('all');
                   }}
                   className="px-3 py-1 bg-amber-100 text-amber-900 rounded-lg text-xs font-bold hover:bg-amber-200 cursor-pointer"
                 >
@@ -343,10 +234,6 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
               filteredMenus.map((m, idx) => {
                 const isSelected = m.id === value;
                 const isHighlighted = idx === highlightedIndex;
-                const isKitchen =
-                  m.category.toLowerCase().includes('kitchen') || m.category.toLowerCase().includes('dapur');
-                const isBar =
-                  m.category.toLowerCase().includes('bar') || m.category.toLowerCase().includes('minuman');
 
                 return (
                   <button
@@ -358,7 +245,7 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                     }}
                     onClick={() => handleSelect(m)}
                     onMouseEnter={() => setHighlightedIndex(idx)}
-                    className={`w-full text-left px-3.5 py-3 rounded-xl text-xs flex items-center justify-between gap-3 transition-all cursor-pointer ${
+                    className={`w-full text-left px-4 py-3 rounded-xl text-xs flex items-center justify-between gap-3 transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-amber-100 text-amber-950 font-bold border border-amber-300 shadow-2xs'
                         : isHighlighted
@@ -366,50 +253,26 @@ export const SearchableMenuSelect: React.FC<SearchableMenuSelectProps> = ({
                         : 'hover:bg-stone-50 text-stone-800'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <span
-                        className={`px-2 py-1 rounded-md text-[10px] font-extrabold shrink-0 border uppercase tracking-wider ${
-                          isKitchen
-                            ? 'bg-amber-100 text-amber-900 border-amber-300'
-                            : isBar
-                            ? 'bg-blue-100 text-blue-900 border-blue-300'
-                            : 'bg-stone-100 text-stone-700 border-stone-300'
-                        }`}
-                      >
-                        {m.category || 'Menu'}
-                      </span>
-                      <span className="font-bold text-stone-900 text-sm leading-snug whitespace-normal break-words">
-                        {m.name}
-                      </span>
-                    </div>
+                    <span className="font-bold text-stone-900 text-sm leading-snug truncate flex-1">
+                      {m.name}
+                    </span>
 
-                    <div className="flex items-center gap-2.5 shrink-0">
-                      {m.price > 0 && (
-                        <span className="font-mono text-xs font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200">
-                          {formatCurrency(m.price)}
-                        </span>
-                      )}
-                      {isSelected ? (
-                        <Check className="w-4 h-4 text-amber-700 shrink-0" />
-                      ) : (
-                        <div className="w-4 h-4" />
-                      )}
-                    </div>
+                    {isSelected && (
+                      <Check className="w-4 h-4 text-amber-700 shrink-0" />
+                    )}
                   </button>
                 );
               })
             )}
           </div>
 
-          {/* Footer keyboard hint */}
-          <div className="p-2 bg-stone-50 border-t border-stone-200 text-[11px] text-stone-500 text-center flex items-center justify-center gap-2">
-            <span>Tekan <kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">↑</kbd> <kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">↓</kbd> geser</span>
-            <span>&bull;</span>
-            <span><kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">Enter</kbd> atau <kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">Klik</kbd> pilih</span>
+          {/* Footer count & shortcut hint */}
+          <div className="p-2 bg-stone-50 border-t border-stone-200 text-[11px] text-stone-500 text-center flex items-center justify-between px-3">
+            <span>{filteredMenus.length} menu tersedia</span>
+            <span>Tekan <kbd className="font-mono bg-white px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 font-bold">Enter</kbd> pilih</span>
           </div>
         </div>
       )}
     </div>
   );
 };
-

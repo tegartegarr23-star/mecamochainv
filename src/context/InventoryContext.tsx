@@ -211,7 +211,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [users, setUsers] = useState<AppUser[]>(() => loadFromStorage(STORAGE_KEYS.USERS, INITIAL_USERS));
   const [currentUser, setCurrentUser] = useState<AppUser>(() => loadFromStorage(STORAGE_KEYS.CURRENT_USER, INITIAL_USERS[0]));
   const [units, setUnits] = useState<Unit[]>(() => loadFromStorage(STORAGE_KEYS.UNITS, INITIAL_UNITS));
-  const [categories, setCategories] = useState<Category[]>(() => loadFromStorage(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES));
+  const [categories, setCategories] = useState<Category[]>(() => {
+    const loaded = loadFromStorage(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES);
+    const filtered = (loaded && loaded.length > 0 ? loaded : INITIAL_CATEGORIES).filter((c) => {
+      const name = (c.name || '').toLowerCase();
+      return name.includes('kitchen') || name.includes('bar') || c.id === 'cat-kitchen' || c.id === 'cat-bar';
+    });
+    return filtered.length > 0 ? filtered : INITIAL_CATEGORIES;
+  });
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => loadFromStorage(STORAGE_KEYS.SUPPLIERS, INITIAL_SUPPLIERS));
   const [ingredients, setIngredients] = useState<Ingredient[]>(() => {
     const loaded = loadFromStorage(STORAGE_KEYS.INGREDIENTS, INITIAL_INGREDIENTS);
@@ -543,10 +550,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         });
       }
       if (sbCategories && sbCategories.length > 0) {
-        setCategories((prev) => {
-          const merged = mergeByField(prev, sbCategories, 'id');
-          saveToStorage(STORAGE_KEYS.CATEGORIES, merged);
-          return merged;
+        setCategories(() => {
+          const valid = sbCategories.map((c) => ({
+            id: String(c.id),
+            name: String(c.name),
+          }));
+          saveToStorage(STORAGE_KEYS.CATEGORIES, valid);
+          return valid;
         });
       }
       if (sbSuppliers && sbSuppliers.length > 0) {
@@ -581,14 +591,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const baseDetails = mergeByField(INITIAL_RECIPE_DETAILS, prev, 'id');
           const combined = sanitizeRecipeDetails(mergeByField(baseDetails, recipeDetailsData, 'id'));
           
-          // Identify menus/recipes that have user-saved details (rd-rec-...)
+          // Identify menus/recipes that have user-saved details (rd-rec-... and rd-rec-prep-...)
           const userSavedRecipeIds = new Set<string>();
           const userSavedMenuIds = new Set<string>();
 
           const allRecipes = mergeByField(INITIAL_RECIPES, recipes, 'id');
 
           for (const rd of combined) {
-            if (rd && rd.id && rd.id.startsWith('rd-rec-')) {
+            if (rd && rd.id && (rd.id.startsWith('rd-rec-') || rd.id.startsWith('rd-rec-prep-'))) {
               if (rd.recipe_id) userSavedRecipeIds.add(rd.recipe_id);
               const foundRec = allRecipes.find((r) => r.id === rd.recipe_id);
               if (foundRec && foundRec.menu_id) {
@@ -600,7 +610,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           // Filter out legacy non-user-saved items for recipes/menus that have user-saved details
           const filtered = combined.filter((rd) => {
             if (!rd || !rd.recipe_id) return false;
-            const isUserSaved = rd.id && rd.id.startsWith('rd-rec-');
+            const isUserSaved = rd.id && (rd.id.startsWith('rd-rec-') || rd.id.startsWith('rd-rec-prep-'));
             if (isUserSaved) return true;
 
             const foundRec = allRecipes.find((r) => r.id === rd.recipe_id);
@@ -615,11 +625,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             return true;
           });
 
+          saveToStorage(STORAGE_KEYS.RECIPE_DETAILS, filtered);
           return filtered;
         });
       } else {
         // If Supabase returned no recipe details at all, ensure seed recipe details are preserved
-        setRecipeDetails((prev) => sanitizeRecipeDetails(mergeByField(INITIAL_RECIPE_DETAILS, prev, 'id')));
+        setRecipeDetails((prev) => {
+          const sanitized = sanitizeRecipeDetails(mergeByField(INITIAL_RECIPE_DETAILS, prev, 'id'));
+          saveToStorage(STORAGE_KEYS.RECIPE_DETAILS, sanitized);
+          return sanitized;
+        });
       }
 
       const cleanTransactions = (sbTransactions || []).map((t) => ({
@@ -2680,17 +2695,34 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const getDailyStockReport = (dateFilter: string): DailyStockRow[] => {
     // Standardize filter date to local YYYY-MM-DD
     const getYYYYMMDD = (input: string | Date | undefined | null): string => {
-      if (!input) return new Date().toISOString().slice(0, 10);
+      if (!input) {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
       if (typeof input === 'string') {
         const trimmed = input.trim();
-        const matchIso = trimmed.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+        if (trimmed === 'all') return 'all';
+        // If string contains T (ISO timestamp), parse with Date to get LOCAL date
+        if (trimmed.includes('T')) {
+          const d = new Date(trimmed);
+          if (!isNaN(d.getTime())) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+          }
+        }
+        const matchIso = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
         if (matchIso) {
           const y = matchIso[1];
           const m = matchIso[2].padStart(2, '0');
           const d = matchIso[3].padStart(2, '0');
           return `${y}-${m}-${d}`;
         }
-        const matchId = trimmed.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+        const matchId = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
         if (matchId) {
           const d = matchId[1].padStart(2, '0');
           const m = matchId[2].padStart(2, '0');
@@ -2705,7 +2737,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const day = String(d.getDate()).padStart(2, '0');
         return `${y}-${m}-${day}`;
       }
-      return new Date().toISOString().slice(0, 10);
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     };
 
     const isAllDates = !dateFilter || dateFilter === 'all';
@@ -2735,16 +2768,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (trx?.transaction_date) {
           return getYYYYMMDD(trx.transaction_date);
         }
+        if (m.created_at) {
+          return getYYYYMMDD(m.created_at);
+        }
         if (trx?.created_at) {
           return getYYYYMMDD(trx.created_at);
         }
-        if (m.description) {
-          const matchRefDate = String(m.description).match(/(?:PUR|PREP|PROD|ADJ)-(\d{4})(\d{2})(\d{2})/i);
-          if (matchRefDate) {
-            return `${matchRefDate[1]}-${matchRefDate[2]}-${matchRefDate[3]}`;
-          }
-        }
-        return getYYYYMMDD(m.created_at);
+        return getYYYYMMDD(new Date().toISOString());
       };
 
       // Movements on targetDate or all dates
@@ -2797,7 +2827,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const isPurchase = trxType === 'purchase' || descLower.includes('pembelian') || descLower.includes('beli') || descLower.includes('pur');
         const isPrepare = trxType === 'prepare' || descLower.includes('prepare') || descLower.includes('konversi') || descLower.includes('prep');
         const isProduction = trxType === 'production' || descLower.includes('produksi') || descLower.includes('penjualan') || descLower.includes('jual') || descLower.includes('porsi') || descLower.includes('prod');
-        const isAdj = trxType === 'adjustment' || descLower.includes('penyesuaian') || descLower.includes('opname') || descLower.includes('init') || descLower.includes('adj');
+        const isAdj = trxType === 'adjustment' || descLower.includes('penyesuaian') || descLower.includes('opname') || descLower.includes('init') || descLower.includes('adj') || descLower.includes('loss') || descLower.includes('damage') || descLower.includes('expired');
 
         if (isPurchase) {
           if (mType === 'in') in_purchase += Number(m.quantity) || 0;
