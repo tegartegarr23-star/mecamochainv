@@ -76,8 +76,8 @@ interface InventoryContextType {
   deleteIngredient: (id: string) => Promise<void>;
 
   menus: Menu[];
-  addMenu: (menu: Omit<Menu, 'id'>) => void;
-  updateMenu: (id: string, menu: Partial<Menu>) => void;
+  addMenu: (menu: Omit<Menu, 'id'>) => Promise<void>;
+  updateMenu: (id: string, menu: Partial<Menu>) => Promise<void>;
   deleteMenu: (id: string) => Promise<void>;
 
   // Recipes
@@ -1622,19 +1622,32 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const newMenu: Menu = {
       id: `m-${Date.now()}`,
       ...menuData,
+      price: Math.max(0, Number(menuData.price) || 0),
       is_active: menuData.is_active ?? true,
       active_recipe_version: 1,
     };
     const defaultRec: Recipe = {
-      id: `rec-${Date.now()}`,
+      id: `rec-${newMenu.id}`,
       menu_id: newMenu.id,
       version: 1,
       is_active: true,
       notes: 'Resep Versi 1 (Awal)',
       created_at: new Date().toISOString(),
     };
-    setMenus((prev) => [...prev, newMenu]);
-    setRecipes((prev) => [...prev, defaultRec]);
+
+    setMenus((prev) => {
+      const next = [...prev, newMenu];
+      saveToStorage(STORAGE_KEYS.MENUS, next);
+      return next;
+    });
+
+    setRecipes((prev) => {
+      const next = [...prev, defaultRec];
+      saveToStorage(STORAGE_KEYS.RECIPES, next);
+      return next;
+    });
+
+    broadcastSync('sync_start');
 
     try {
       const supabase = getSupabase();
@@ -1677,33 +1690,58 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateMenu = async (id: string, menu: Partial<Menu>) => {
-    let updatedMenuObj: Menu | undefined;
-    setMenus((prev) =>
-      prev.map((m) => {
-        if (m.id === id) {
-          updatedMenuObj = { ...m, ...menu };
-          return updatedMenuObj;
+    const cleanId = String(id).trim();
+    const existingMenu = menus.find(
+      (m) => String(m.id).trim().toLowerCase() === cleanId.toLowerCase()
+    );
+
+    const finalPrice = menu.price !== undefined ? Math.max(0, Number(menu.price) || 0) : Number(existingMenu?.price || 0);
+
+    const finalMenuObj: Menu = {
+      id: existingMenu?.id || cleanId,
+      name: menu.name !== undefined ? String(menu.name) : (existingMenu?.name || ''),
+      category: menu.category !== undefined ? String(menu.category) : (existingMenu?.category || 'Umum'),
+      price: finalPrice,
+      is_active: menu.is_active !== undefined ? menu.is_active : (existingMenu?.is_active ?? true),
+      active_recipe_version: menu.active_recipe_version !== undefined ? menu.active_recipe_version : (existingMenu?.active_recipe_version || 1),
+    };
+
+    setMenus((prev) => {
+      const next = prev.map((m) => {
+        if (String(m.id).trim().toLowerCase() === cleanId.toLowerCase()) {
+          return finalMenuObj;
         }
         return m;
-      })
-    );
+      });
+      saveToStorage(STORAGE_KEYS.MENUS, next);
+      return next;
+    });
+
+    broadcastSync('sync_start');
+
     try {
       const supabase = getSupabase();
-      if (supabase && updatedMenuObj) {
-        let { error: mErr } = await supabase.from('menus').upsert([{
-          id: String(updatedMenuObj.id),
-          name: String(updatedMenuObj.name),
-          category: String(updatedMenuObj.category || 'Umum'),
-          price: Number(updatedMenuObj.price) || 0,
-          is_active: updatedMenuObj.is_active ?? true,
-        }]);
+      if (supabase) {
+        const payload = {
+          id: String(finalMenuObj.id),
+          name: String(finalMenuObj.name),
+          category: String(finalMenuObj.category || 'Umum'),
+          price: Number(finalMenuObj.price) || 0,
+          is_active: finalMenuObj.is_active ?? true,
+        };
+
+        let { error: mErr } = await supabase.from('menus').upsert([payload]);
         if (mErr) {
-          await supabase.from('menus').upsert([{
-            id: String(updatedMenuObj.id),
-            name: String(updatedMenuObj.name),
-            category: String(updatedMenuObj.category || 'Umum'),
-            price: Number(updatedMenuObj.price) || 0,
-          }]);
+          console.warn('Upsert menu failed, attempting direct update in Supabase:', mErr);
+          await supabase
+            .from('menus')
+            .update({
+              name: payload.name,
+              category: payload.category,
+              price: payload.price,
+              is_active: payload.is_active,
+            })
+            .eq('id', String(finalMenuObj.id));
         }
       }
     } catch (e) {
@@ -2990,15 +3028,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             return mDate < targetDate;
           });
 
-      // Initial stock at the beginning of targetDate
-      let initial_stock = 0;
-      movementsBefore.forEach((m) => {
-        const mType = String(m.type || '').trim().toLowerCase();
-        const qty = Number(m.quantity) || 0;
-        if (mType === 'in') initial_stock += qty;
-        else if (mType === 'out') initial_stock -= qty;
-      });
-
       let in_purchase = 0;
       let in_prepare = 0;
       let out_prepare = 0;
@@ -3048,8 +3077,25 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const totalTodayIn = in_purchase + in_prepare + in_adjustment;
       const totalTodayOut = out_prepare + out_production + out_adjustment;
 
+      // Initial stock at the beginning of targetDate
+      let initial_stock = 0;
+      if (isAllDates) {
+        // In all dates mode, final stock is live stock, initial stock is live stock minus net movement
+        initial_stock = Math.max(0, liveStock - totalTodayIn + totalTodayOut);
+      } else if (movementsBefore.length === 0 && movementsToday.length === 0) {
+        // If no movements recorded before or on target date, use live stock as baseline
+        initial_stock = liveStock;
+      } else {
+        movementsBefore.forEach((m) => {
+          const mType = String(m.type || '').trim().toLowerCase();
+          const qty = Number(m.quantity) || 0;
+          if (mType === 'in') initial_stock += qty;
+          else if (mType === 'out') initial_stock -= qty;
+        });
+      }
+
       // Stock at the end of targetDate
-      const final_stock = initial_stock + totalTodayIn - totalTodayOut;
+      const final_stock = isAllDates ? liveStock : initial_stock + totalTodayIn - totalTodayOut;
 
       return {
         ingredient: { ...ing, current_stock: liveStock },

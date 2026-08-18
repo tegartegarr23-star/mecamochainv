@@ -48,13 +48,15 @@ export const MenusManager: React.FC = () => {
   const [recipeNotes, setRecipeNotes] = useState('');
   const [recipeItems, setRecipeItems] = useState<Array<{ ingredient_id: string; quantity: string }>>([]);
 
+  const [isSavingMenu, setIsSavingMenu] = useState(false);
+
   // Open Menu Create / Edit
   const handleOpenMenuModal = (menu?: Menu) => {
     if (menu) {
       setEditingMenu(menu);
-      setMenuName(menu.name);
-      setMenuCategory(menu.category);
-      setMenuPrice(String(menu.price || 0));
+      setMenuName(menu.name || '');
+      setMenuCategory(menu.category || 'Kitchen');
+      setMenuPrice(String(menu.price ?? 0));
     } else {
       setEditingMenu(null);
       setMenuName('');
@@ -64,27 +66,34 @@ export const MenusManager: React.FC = () => {
     setIsMenuModalOpen(true);
   };
 
-  const handleSaveMenu = (e: React.FormEvent) => {
+  const handleSaveMenu = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!menuName.trim()) return;
 
     const numPrice = Math.max(0, Number(menuPrice) || 0);
+    setIsSavingMenu(true);
 
-    if (editingMenu) {
-      updateMenu(editingMenu.id, {
-        name: menuName,
-        category: menuCategory,
-        price: numPrice,
-      });
-    } else {
-      addMenu({
-        name: menuName,
-        category: menuCategory,
-        price: numPrice,
-        is_active: true,
-      });
+    try {
+      if (editingMenu) {
+        await updateMenu(editingMenu.id, {
+          name: menuName.trim(),
+          category: menuCategory.trim() || 'Kitchen',
+          price: numPrice,
+        });
+      } else {
+        await addMenu({
+          name: menuName.trim(),
+          category: menuCategory.trim() || 'Kitchen',
+          price: numPrice,
+          is_active: true,
+        });
+      }
+      setIsMenuModalOpen(false);
+    } catch (err) {
+      console.error('Error saving menu:', err);
+    } finally {
+      setIsSavingMenu(false);
     }
-    setIsMenuModalOpen(false);
   };
 
   // Extract unique categories dynamically from menus
@@ -486,9 +495,10 @@ export const MenusManager: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-amber-800 text-white font-bold text-xs shadow-md"
+                  disabled={isSavingMenu}
+                  className="px-5 py-2 rounded-xl bg-amber-800 hover:bg-amber-900 text-white font-bold text-xs shadow-md disabled:opacity-50 transition-all flex items-center gap-1.5"
                 >
-                  Simpan Menu
+                  {isSavingMenu ? 'Menyimpan...' : 'Simpan Menu'}
                 </button>
               </div>
             </form>

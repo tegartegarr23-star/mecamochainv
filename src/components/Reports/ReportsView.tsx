@@ -8,7 +8,6 @@ import {
   Filter,
   ArrowDownRight,
   ArrowUpRight,
-  BookOpen,
   RefreshCw,
   ShoppingBag,
   TrendingUp,
@@ -18,6 +17,7 @@ import {
   AlertTriangle,
   Layers,
   ArrowUpDown,
+  BookOpen,
 } from 'lucide-react';
 import { useInventory } from '../../context/InventoryContext';
 import { SearchableIngredientSelect } from '../Common/SearchableIngredientSelect';
