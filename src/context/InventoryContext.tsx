@@ -2470,29 +2470,41 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   };
 
-  // Helper to get actual current stock based on latest stock movement balance_after
+  // Helper to get actual current stock based on running sum and latest balance_after
   const getIngredientCurrentStock = (ing: Ingredient, movements: StockMovement[]): number => {
     if (!ing) return 0;
     const ingId = String(ing.id || '').trim().toLowerCase();
     const ingCode = String(ing.code || '').trim().toLowerCase();
 
-    const ingMovs = movements.filter((m) => {
+    const isIngMatch = (m: StockMovement) => {
       if (!m || !m.ingredient_id) return false;
-      const mId = String(m.ingredient_id).trim().toLowerCase();
+      const mId = (typeof m.ingredient_id === 'object' && m.ingredient_id !== null ? String((m.ingredient_id as any).id || '') : String(m.ingredient_id || '')).trim().toLowerCase();
       return mId === ingId || mId === ingCode;
-    });
+    };
+
+    const ingMovs = movements.filter(isIngMatch);
 
     if (ingMovs.length > 0) {
+      // Sort chronologically ascending
       const sortedMovs = [...ingMovs].sort((a, b) => {
         const timeA = new Date(a.created_at).getTime() || 0;
         const timeB = new Date(b.created_at).getTime() || 0;
-        if (timeB !== timeA) return timeB - timeA;
-        return String(b.id).localeCompare(String(a.id));
+        if (timeA !== timeB) return timeA - timeB;
+        return String(a.id).localeCompare(String(b.id));
       });
-      const latest = sortedMovs[0];
+
+      const latest = sortedMovs[sortedMovs.length - 1];
       if (latest && latest.balance_after !== undefined && latest.balance_after !== null && !isNaN(Number(latest.balance_after))) {
         return Number(latest.balance_after);
       }
+
+      let running = 0;
+      sortedMovs.forEach((m) => {
+        const q = Number(m.quantity) || 0;
+        if (m.type === 'in') running += q;
+        else if (m.type === 'out') running -= q;
+      });
+      return running;
     }
     return Number(ing.current_stock) || 0;
   };
@@ -2529,6 +2541,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const refNo = generateRefNo('ADJ');
 
     const isoDate = createLocalDateTimeIso(date);
+    const targetTimestamp = new Date(isoDate).getTime();
+
     const newTrx: Transaction = {
       id: trxId,
       type: 'adjustment',
@@ -2542,56 +2556,100 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const newMovements: StockMovement[] = [];
     const updatedIngredients = [...ingredients];
+    let updatedStockMovements = [...stockMovements];
 
     items.forEach((item, index) => {
+      const targetId = String(item.ingredient_id || '').trim().toLowerCase();
       const ingIndex = updatedIngredients.findIndex(
-        (i) => String(i.id).trim() === String(item.ingredient_id).trim() || String(i.code || '').trim() === String(item.ingredient_id).trim()
+        (i) => String(i.id).trim().toLowerCase() === targetId || String(i.code || '').trim().toLowerCase() === targetId
       );
       if (ingIndex === -1) return;
 
       const ing = updatedIngredients[ingIndex];
-      const currentStock = getIngredientCurrentStock(ing, [...newMovements, ...stockMovements]);
+      const realIngId = String(ing.id);
+      const realIngCode = String(ing.code || '').toLowerCase();
+
+      const isIngMatch = (m: StockMovement) => {
+        if (!m || !m.ingredient_id) return false;
+        const mId = (typeof m.ingredient_id === 'object' && m.ingredient_id !== null ? String((m.ingredient_id as any).id || '') : String(m.ingredient_id || '')).trim().toLowerCase();
+        return mId === realIngId.toLowerCase() || mId === realIngCode;
+      };
+
+      // 1. Calculate stock balance of this ingredient up to this adjustment's target date/timestamp
+      const priorMovs = updatedStockMovements.filter((m) => isIngMatch(m) && new Date(m.created_at).getTime() <= targetTimestamp);
+      let stockPriorOnDate = 0;
+      priorMovs.forEach((m) => {
+        const q = Number(m.quantity) || 0;
+        if (m.type === 'in') stockPriorOnDate += q;
+        else if (m.type === 'out') stockPriorOnDate -= q;
+      });
+
       const qty = Math.max(0, Number(item.quantity) || 0);
 
-      let newStock = currentStock;
-      let moveQty = qty;
+      let delta = 0;
       let moveType: 'in' | 'out' = 'out';
+      let moveQty = 0;
+      let balanceAfterOnDate = 0;
 
       if (item.mode === 'set') {
-        newStock = qty;
-        const diff = newStock - currentStock;
-        moveType = diff >= 0 ? 'in' : 'out';
-        moveQty = Math.abs(diff);
+        // Stock Opname: Setting physical stock on target date to target qty
+        delta = qty - stockPriorOnDate;
+        balanceAfterOnDate = qty;
+        moveType = delta >= 0 ? 'in' : 'out';
+        moveQty = Math.abs(delta);
       } else if (item.mode === 'plus') {
-        newStock = currentStock + qty;
+        delta = qty;
+        balanceAfterOnDate = stockPriorOnDate + qty;
         moveType = 'in';
         moveQty = qty;
       } else {
-        newStock = currentStock - qty;
+        // 'minus'
+        delta = -qty;
+        balanceAfterOnDate = stockPriorOnDate - qty;
         moveType = 'out';
         moveQty = qty;
       }
 
-      updatedIngredients[ingIndex] = { ...ing, current_stock: newStock };
-
       const itemDesc = item.mode === 'set'
-        ? `Stock Opname: ${currentStock} -> ${newStock} (${item.item_notes || reason}) (${refNo})`
+        ? `Stock Opname: ${stockPriorOnDate} -> ${balanceAfterOnDate} (${item.item_notes || reason}) (${refNo})`
         : `Penyesuaian Stok (${moveType === 'in' ? '+' : '-'}) Alasan: ${reason} - ${item.item_notes || notes} (${refNo})`;
 
-      newMovements.push({
+      const movTimestamp = new Date(targetTimestamp + index * 10).toISOString();
+      const newMov: StockMovement = {
         id: `mov-${now}-${index}`,
         transaction_id: trxId,
-        ingredient_id: ing.id,
+        ingredient_id: realIngId,
         type: moveType,
         quantity: moveQty,
-        balance_after: newStock,
+        balance_after: balanceAfterOnDate,
         description: itemDesc,
-        created_at: new Date(new Date(isoDate).getTime() + index * 10).toISOString(),
-      });
+        created_at: movTimestamp,
+      };
+      newMovements.push(newMov);
+
+      // 2. If there are future movements after this date for this ingredient, adjust their balance_after by delta
+      if (delta !== 0) {
+        updatedStockMovements = updatedStockMovements.map((m) => {
+          if (isIngMatch(m) && new Date(m.created_at).getTime() > targetTimestamp) {
+            return {
+              ...m,
+              balance_after: (Number(m.balance_after) || 0) + delta,
+            };
+          }
+          return m;
+        });
+      }
+
+      // 3. Update current live stock of ingredient today
+      const currentLive = Number(ing.current_stock) || 0;
+      updatedIngredients[ingIndex] = {
+        ...ing,
+        current_stock: currentLive + delta,
+      };
     });
 
     const nextTrxs = [newTrx, ...transactions];
-    const nextMovs = [...newMovements, ...stockMovements];
+    const nextMovs = [...newMovements, ...updatedStockMovements];
 
     setIngredients(updatedIngredients);
     setTransactions(nextTrxs);
@@ -2920,8 +2978,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return mDate === targetDate;
       });
 
-      // Movements created AFTER targetDate (future relative to report date)
-      const movementsAfter = isAllDates
+      // Movements created BEFORE targetDate (for calculating initial stock at the start of targetDate)
+      const movementsBefore = isAllDates
         ? []
         : stockMovements.filter((m) => {
             if (!m || !m.ingredient_id) return false;
@@ -2929,8 +2987,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             if (mIngId !== ingId && mIngId !== ingCode) return false;
 
             const mDate = getMovementDate(m);
-            return mDate > targetDate;
+            return mDate < targetDate;
           });
+
+      // Initial stock at the beginning of targetDate
+      let initial_stock = 0;
+      movementsBefore.forEach((m) => {
+        const mType = String(m.type || '').trim().toLowerCase();
+        const qty = Number(m.quantity) || 0;
+        if (mType === 'in') initial_stock += qty;
+        else if (mType === 'out') initial_stock -= qty;
+      });
 
       let in_purchase = 0;
       let in_prepare = 0;
@@ -2954,6 +3021,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const descLower = m.description ? String(m.description).toLowerCase() : '';
         const trxType = trx?.type ? String(trx.type).toLowerCase() : '';
         const mType = String(m.type || '').trim().toLowerCase();
+        const qty = Number(m.quantity) || 0;
 
         const isPurchase = trxType === 'purchase' || descLower.includes('pembelian') || descLower.includes('beli') || descLower.includes('pur');
         const isPrepare = trxType === 'prepare' || descLower.includes('prepare') || descLower.includes('konversi') || descLower.includes('prep');
@@ -2961,39 +3029,27 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const isAdj = trxType === 'adjustment' || descLower.includes('penyesuaian') || descLower.includes('opname') || descLower.includes('init') || descLower.includes('adj') || descLower.includes('loss') || descLower.includes('damage') || descLower.includes('expired');
 
         if (isPurchase) {
-          if (mType === 'in') in_purchase += Number(m.quantity) || 0;
+          if (mType === 'in') in_purchase += qty;
         } else if (isPrepare) {
-          if (mType === 'in') in_prepare += Number(m.quantity) || 0;
-          if (mType === 'out') out_prepare += Number(m.quantity) || 0;
+          if (mType === 'in') in_prepare += qty;
+          if (mType === 'out') out_prepare += qty;
         } else if (isProduction) {
-          if (mType === 'out') out_production += Number(m.quantity) || 0;
+          if (mType === 'out') out_production += qty;
         } else if (isAdj) {
-          if (mType === 'in') in_adjustment += Number(m.quantity) || 0;
-          if (mType === 'out') out_adjustment += Number(m.quantity) || 0;
+          if (mType === 'in') in_adjustment += qty;
+          if (mType === 'out') out_adjustment += qty;
         } else {
-          if (mType === 'in') in_adjustment += Number(m.quantity) || 0;
-          if (mType === 'out') out_adjustment += Number(m.quantity) || 0;
+          if (mType === 'in') in_adjustment += qty;
+          if (mType === 'out') out_adjustment += qty;
         }
       });
-
-      // Future movements calculation
-      let in_after = 0;
-      let out_after = 0;
-      movementsAfter.forEach((m) => {
-        const mType = String(m.type || '').trim().toLowerCase();
-        if (mType === 'in') in_after += Number(m.quantity) || 0;
-        if (mType === 'out') out_after += Number(m.quantity) || 0;
-      });
-
-      // Stock at the end of targetDate
-      const final_stock = liveStock - in_after + out_after;
 
       // Total changes on targetDate
       const totalTodayIn = in_purchase + in_prepare + in_adjustment;
       const totalTodayOut = out_prepare + out_production + out_adjustment;
 
-      // Stock at the beginning of targetDate
-      const initial_stock = final_stock - totalTodayIn + totalTodayOut;
+      // Stock at the end of targetDate
+      const final_stock = initial_stock + totalTodayIn - totalTodayOut;
 
       return {
         ingredient: { ...ing, current_stock: liveStock },
