@@ -171,83 +171,73 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   const [prepItems, setPrepItems] = useState<PrepareItemInput[]>([
     { ingredient_id: preparedIngredients[0]?.id || ingredients[0]?.id || '', quantity: 1000, is_target: true },
   ]);
+  const [isSavingFormula, setIsSavingFormula] = useState(false);
 
-  const lastValidTargetQty = useRef<number>(1000);
-
-  // Load / Sync Prepare Formula Template ONLY when Target PP ingredient changes
+  // Load Prepare Formula Template when Target PP ingredient changes
   useEffect(() => {
     if (!prepTargetIngId) return;
     const { details } = getPrepareFormula(prepTargetIngId);
 
-    const baseQty = 1000;
-    setPrepTargetQty(baseQty);
-    lastValidTargetQty.current = baseQty;
+    const currentTargetQty = prepTargetQty > 0 ? prepTargetQty : 1000;
 
     if (details && details.length > 0) {
       const sourceItems: PrepareItemInput[] = details.map((d) => ({
         ingredient_id: d.ingredient_id,
-        quantity: Math.round(Number(d.quantity) * 100) / 100,
+        quantity: Number(d.quantity) || 0,
         is_target: false,
       }));
       setPrepItems([
-        { ingredient_id: prepTargetIngId, quantity: baseQty, is_target: true },
+        { ingredient_id: prepTargetIngId, quantity: currentTargetQty, is_target: true },
         ...sourceItems,
       ]);
     } else {
-      const defaultRaw = ingredients.find((i) => i.type === 'raw');
+      // Do NOT auto-inject unwanted default raw ingredients! Start clean with just the target item
       setPrepItems([
-        { ingredient_id: prepTargetIngId, quantity: baseQty, is_target: true },
-        ...(defaultRaw ? [{ ingredient_id: defaultRaw.id, quantity: baseQty, is_target: false }] : []),
+        { ingredient_id: prepTargetIngId, quantity: currentTargetQty, is_target: true },
       ]);
     }
   }, [prepTargetIngId]);
 
+  // When user enters / updates target prepare quantity, ONLY update target item quantity. NEVER auto-scale raw ingredients!
   const handleTargetQtyChange = (newVal: number) => {
-    const prevVal = lastValidTargetQty.current > 0 ? lastValidTargetQty.current : 1000;
     setPrepTargetQty(newVal);
-
-    if (newVal > 0 && prevVal > 0 && newVal !== prevVal) {
-      const ratio = newVal / prevVal;
-      setPrepItems((prev) =>
-        prev.map((item) => {
-          if (item.is_target) {
-            return { ...item, ingredient_id: prepTargetIngId, quantity: newVal };
-          }
-          const scaledQty = Math.round(item.quantity * ratio * 100) / 100;
-          return { ...item, quantity: scaledQty };
-        })
-      );
-      lastValidTargetQty.current = newVal;
-    } else {
-      setPrepItems((prev) =>
-        prev.map((item) => {
-          if (item.is_target) {
-            return { ...item, ingredient_id: prepTargetIngId, quantity: newVal };
-          }
-          return item;
-        })
-      );
-      if (newVal > 0) lastValidTargetQty.current = newVal;
-    }
+    setPrepItems((prev) =>
+      prev.map((item) => {
+        if (item.is_target) {
+          return { ...item, ingredient_id: prepTargetIngId, quantity: newVal };
+        }
+        return item; // Keep raw ingredients untouched
+      })
+    );
   };
 
-  const handleSavePrepareFormula = () => {
-    if (!prepTargetIngId) return;
-    const sourceItems = prepItems.filter((i) => !i.is_target && i.ingredient_id && i.quantity > 0);
+  const handleSavePrepareFormula = async () => {
+    if (!prepTargetIngId) {
+      alert('Pilih bahan target prepare terlebih dahulu!');
+      return;
+    }
+    const sourceItems = prepItems.filter((i) => !i.is_target && i.ingredient_id && Number(i.quantity) > 0);
     if (sourceItems.length === 0) {
-      alert('Pilih minimal 1 bahan mentah pendukung untuk disimpan dalam formula!');
+      alert('Pilih minimal 1 bahan mentah pendukung dengan jumlah > 0 untuk disimpan sebagai formula standar!');
       return;
     }
 
-    const currentQty = prepTargetQty > 0 ? prepTargetQty : 1000;
     const formulaDetails = sourceItems.map((item) => ({
       ingredient_id: item.ingredient_id,
-      quantity: Math.round(item.quantity * 100) / 100,
+      quantity: Number(item.quantity) || 0,
     }));
 
-    const targetIng = ingredients.find((i) => i.id === prepTargetIngId);
-    savePrepareFormula(prepTargetIngId, formulaDetails);
-    alert(`Formula resep standar untuk "${targetIng?.name || 'Bahan Prepare'}" (${currentQty} ${units.find((u) => u.id === targetIng?.unit_id)?.abbreviation || 'unit'}) berhasil disimpan secara permanen! Setiap kali Anda memilih bahan ini, komposisi akan terisi otomatis.`);
+    setIsSavingFormula(true);
+    try {
+      const targetIng = ingredients.find((i) => i.id === prepTargetIngId);
+      await savePrepareFormula(prepTargetIngId, formulaDetails);
+      alert(`Formula resep standar untuk "${targetIng?.name || 'Bahan Prepare'}" berhasil disimpan! Komposisi bahan ini tersimpan secara permanen.`);
+    } catch (e) {
+      console.error('Error saving prepare formula:', e);
+      alert('Gagal menyimpan formula. Silakan coba lagi.');
+    } finally {
+      setIsSavingFormula(false);
+    }
   };
 
   // 3. Production Form State
@@ -924,15 +914,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-stone-900">Komposisi Bahan Mentah Yang Digunakan</h4>
-                  <p className="text-[11px] text-stone-500">Anda dapat mengubah jenis bahan atau jumlahnya di bawah ini</p>
+                  <p className="text-[11px] text-stone-500">Tentukan bahan baku mentah dan jumlah takaran yang dipakai</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    disabled={isSavingFormula}
                     onClick={handleSavePrepareFormula}
-                    className="px-3 py-1.5 rounded-xl bg-blue-100 hover:bg-blue-200 text-blue-900 text-xs font-bold transition-all flex items-center gap-1 border border-blue-300"
+                    className="px-3 py-1.5 rounded-xl bg-blue-100 hover:bg-blue-200 text-blue-900 text-xs font-bold transition-all flex items-center gap-1 border border-blue-300 disabled:opacity-50"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-blue-700" /> Simpan Formula Standar
+                    <Sparkles className="w-3.5 h-3.5 text-blue-700" /> {isSavingFormula ? 'Menyimpan...' : 'Simpan Formula Standar'}
                   </button>
                   <button
                     type="button"
@@ -946,77 +937,104 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                         },
                       ])
                     }
-                    className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold transition-all flex items-center gap-1"
+                    className="px-3 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold transition-all flex items-center gap-1 shadow-xs"
                   >
-                    <Plus className="w-3.5 h-3.5" /> + Tambah Bahan
+                    <Plus className="w-3.5 h-3.5" /> + Tambah Bahan Mentah
                   </button>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                {prepItems.map((item, idx) => {
-                  const ing = ingredients.find((i) => i.id === item.ingredient_id);
-                  const unit = units.find((u) => u.id === ing?.unit_id);
+              {prepItems.filter((i) => !i.is_target).length === 0 ? (
+                <div className="p-6 text-center rounded-xl bg-stone-50 border border-dashed border-stone-300 space-y-2">
+                  <p className="text-xs text-stone-500 font-medium">
+                    Belum ada bahan baku mentah yang dipilih untuk proses prepare ini.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPrepItems([
+                        ...prepItems,
+                        {
+                          ingredient_id: ingredients.find((i) => i.type === 'raw')?.id || ingredients[0]?.id || '',
+                          quantity: 100,
+                          is_target: false,
+                        },
+                      ])
+                    }
+                    className="px-4 py-2 rounded-xl bg-blue-800 hover:bg-blue-900 text-white text-xs font-bold transition-all inline-flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Plus className="w-4 h-4" /> + Tambah Bahan Mentah
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {prepItems.map((item, idx) => {
+                    const ing = ingredients.find((i) => i.id === item.ingredient_id);
+                    const unit = units.find((u) => u.id === ing?.unit_id);
 
-                  if (item.is_target) return null; // Target row shown in top header
+                    if (item.is_target) return null; // Target row shown in top header
 
-                  const isStockNegative = ing && ing.current_stock < 0;
+                    const isStockNegative = ing && ing.current_stock < 0;
 
-                  return (
-                    <div
-                      key={idx}
-                      className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-stone-50 border border-stone-200"
-                    >
-                      <span className="px-2.5 py-1 text-[10px] font-extrabold rounded-lg bg-rose-100 text-rose-900 border border-rose-300">
-                        Keluar (-) Bahan Mentah
-                      </span>
+                    return (
+                      <div
+                        key={idx}
+                        className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-stone-50 border border-stone-200"
+                      >
+                        <span className="px-2.5 py-1 text-[10px] font-extrabold rounded-lg bg-rose-100 text-rose-900 border border-rose-300">
+                          Keluar (-) Bahan Mentah
+                        </span>
 
-                      <SearchableIngredientSelect
-                        ingredients={ingredients}
-                        value={item.ingredient_id}
-                        onChange={(newId) => {
-                          const newItems = [...prepItems];
-                          newItems[idx].ingredient_id = newId;
-                          setPrepItems(newItems);
-                        }}
-                        className="flex-1 min-w-48"
-                      />
-
-                      <div className="w-36 flex items-center gap-1">
-                        <input
-                          type="number"
-                          step="any"
-                          required
-                          placeholder="Jumlah"
-                          value={item.quantity}
-                          onChange={(e) => {
+                        <SearchableIngredientSelect
+                          ingredients={ingredients}
+                          value={item.ingredient_id}
+                          onChange={(newId) => {
                             const newItems = [...prepItems];
-                            newItems[idx].quantity = Number(e.target.value);
+                            newItems[idx].ingredient_id = newId;
                             setPrepItems(newItems);
                           }}
-                          className="w-full px-3 py-2 text-xs font-mono font-bold rounded-lg bg-white border border-stone-200 focus:outline-none"
+                          className="flex-1 min-w-48"
                         />
-                        <span className="text-xs font-bold text-stone-500">{unit?.abbreviation}</span>
-                      </div>
 
-                      <div className="text-right min-w-28 text-[11px]">
-                        <span className="block text-stone-400">Sisa Stok:</span>
-                        <span className={`font-mono font-bold ${isStockNegative ? 'text-red-600 font-extrabold' : 'text-stone-700'}`}>
-                          {ing ? formatNumber(ing.current_stock) : 0} {unit?.abbreviation || ''}
-                        </span>
-                      </div>
+                        <div className="w-36 flex items-center gap-1">
+                          <input
+                            type="number"
+                            step="any"
+                            required
+                            placeholder="Jumlah"
+                            value={item.quantity === 0 ? '' : item.quantity}
+                            onChange={(e) => {
+                              const rawVal = e.target.value;
+                              const val = rawVal === '' ? 0 : Number(rawVal);
+                              const newItems = [...prepItems];
+                              newItems[idx].quantity = val;
+                              setPrepItems(newItems);
+                            }}
+                            className="w-full px-3 py-2 text-xs font-mono font-bold rounded-lg bg-white border border-stone-200 focus:outline-none"
+                          />
+                          <span className="text-xs font-bold text-stone-500">{unit?.abbreviation}</span>
+                        </div>
 
-                      <button
-                        type="button"
-                        onClick={() => setPrepItems(prepItems.filter((_, i) => i !== idx))}
-                        className="p-2 text-stone-400 hover:text-rose-600 rounded-lg hover:bg-rose-50"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                        <div className="text-right min-w-28 text-[11px]">
+                          <span className="block text-stone-400">Sisa Stok:</span>
+                          <span className={`font-mono font-bold ${isStockNegative ? 'text-red-600 font-extrabold' : 'text-stone-700'}`}>
+                            {ing ? formatNumber(ing.current_stock) : 0} {unit?.abbreviation || ''}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setPrepItems(prepItems.filter((_, i) => i !== idx))}
+                          className="p-2 text-stone-400 hover:text-rose-600 rounded-lg hover:bg-rose-50"
+                          title="Hapus bahan"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             <button

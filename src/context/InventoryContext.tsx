@@ -87,7 +87,7 @@ interface InventoryContextType {
   setActiveRecipeVersion: (menuId: string, version: number) => void;
   getMenuRecipeDetails: (menuId: string, version?: number) => { recipe?: Recipe; details: Array<RecipeDetail & { ingredient?: Ingredient; unit?: Unit }> };
   getPrepareFormula: (prepIngredientId: string) => { recipe?: Recipe; details: Array<RecipeDetail & { ingredient?: Ingredient; unit?: Unit }> };
-  savePrepareFormula: (prepIngredientId: string, details: Array<{ ingredient_id: string; quantity: number }>) => void;
+  savePrepareFormula: (prepIngredientId: string, details: Array<{ ingredient_id: string; quantity: number }>) => Promise<void>;
 
   // Transactions & Stock Movements
   transactions: Transaction[];
@@ -694,6 +694,39 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           });
 
           saveToStorage(STORAGE_KEYS.RECIPE_DETAILS, filtered);
+
+          // Extract and sync prepare formulas into prepareFormulas state
+          const extractedPrepFormulas: Record<string, Array<{ ingredient_id: string; quantity: number }>> = {};
+          for (const rd of filtered) {
+            if (rd.id?.startsWith('rd-rec-prep-') || rd.recipe_id?.startsWith('rec-prep-')) {
+              let prepIngId = '';
+              if (rd.recipe_id?.startsWith('rec-prep-')) {
+                prepIngId = rd.recipe_id.replace('rec-prep-', '');
+              } else if (rd.id?.startsWith('rd-rec-prep-')) {
+                const parts = rd.id.replace('rd-rec-prep-', '').split('-');
+                if (parts.length >= 2) {
+                  prepIngId = parts[0];
+                }
+              }
+              if (prepIngId) {
+                if (!extractedPrepFormulas[prepIngId]) extractedPrepFormulas[prepIngId] = [];
+                if (!extractedPrepFormulas[prepIngId].some((x) => x.ingredient_id === rd.ingredient_id)) {
+                  extractedPrepFormulas[prepIngId].push({
+                    ingredient_id: rd.ingredient_id,
+                    quantity: Number(rd.quantity) || 0,
+                  });
+                }
+              }
+            }
+          }
+          if (Object.keys(extractedPrepFormulas).length > 0) {
+            setPrepareFormulas((prevPrep) => {
+              const nextPrep = { ...prevPrep, ...extractedPrepFormulas };
+              saveToStorage(STORAGE_KEYS.PREPARE_FORMULAS, nextPrep);
+              return nextPrep;
+            });
+          }
+
           return filtered;
         });
       } else {
@@ -2005,47 +2038,70 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const getPrepareFormula = (prepIngredientId: string) => {
-    const canonicalRecipeId = `rec-prep-${prepIngredientId}`;
-    let recipe = recipes.find((r) => r.menu_id === prepIngredientId || r.id === canonicalRecipeId);
+    const cleanPrepId = String(prepIngredientId).trim();
+    const canonicalRecipeId = `rec-prep-${cleanPrepId}`;
+    let recipe = recipes.find((r) => r.menu_id === cleanPrepId || r.id === canonicalRecipeId);
 
     if (!recipe) {
       recipe = {
         id: canonicalRecipeId,
-        menu_id: prepIngredientId,
+        menu_id: cleanPrepId,
         version: 1,
         is_active: true,
-        notes: `Formula Prepare ${prepIngredientId}`,
+        notes: `Formula Prepare ${cleanPrepId}`,
         created_at: new Date().toISOString(),
       };
     }
 
-    // 1. First priority: Check prepareFormulas direct map
-    if (prepareFormulas && prepareFormulas[prepIngredientId] && prepareFormulas[prepIngredientId].length > 0) {
-      const details = prepareFormulas[prepIngredientId].map((d) => {
-        const ing = ingredients.find((i) => i.id === d.ingredient_id || i.code === d.ingredient_id);
-        const unit = units.find((u) => u.id === ing?.unit_id);
-        return {
-          id: `rd-rec-prep-${prepIngredientId}-${d.ingredient_id}`,
-          recipe_id: canonicalRecipeId,
-          ingredient_id: d.ingredient_id,
-          quantity: d.quantity,
-          ingredient: ing,
-          unit: unit,
-        };
-      });
-      return { recipe, details };
+    // 1. First priority: Check prepareFormulas direct state map or localStorage
+    const formulaInState = prepareFormulas?.[cleanPrepId] || prepareFormulas?.[prepIngredientId];
+    if (formulaInState && Array.isArray(formulaInState) && formulaInState.length > 0) {
+      const details = formulaInState
+        .filter((d) => d && d.ingredient_id)
+        .map((d) => {
+          const ing = ingredients.find(
+            (i) =>
+              String(i.id).trim().toLowerCase() === String(d.ingredient_id).trim().toLowerCase() ||
+              String(i.code).trim().toLowerCase() === String(d.ingredient_id).trim().toLowerCase()
+          );
+          const unit = units.find((u) => u.id === ing?.unit_id);
+          return {
+            id: `rd-rec-prep-${cleanPrepId}-${d.ingredient_id}`,
+            recipe_id: canonicalRecipeId,
+            ingredient_id: d.ingredient_id,
+            quantity: Number(d.quantity) || 0,
+            ingredient: ing,
+            unit: unit,
+          };
+        });
+      if (details.length > 0) {
+        return { recipe, details };
+      }
     }
 
+    // 2. Second priority: Search recipeDetails state
     const possibleRecipeIds = new Set<string>([
       recipe.id,
       canonicalRecipeId,
-      prepIngredientId,
+      cleanPrepId,
+      `rec-${cleanPrepId}`,
     ]);
 
-    const rawDetails = recipeDetails.filter((rd) => rd && rd.recipe_id && possibleRecipeIds.has(rd.recipe_id));
+    const rawDetails = recipeDetails.filter(
+      (rd) =>
+        rd &&
+        rd.ingredient_id &&
+        (possibleRecipeIds.has(rd.recipe_id) ||
+          rd.id?.includes(`rec-prep-${cleanPrepId}`) ||
+          rd.id?.includes(cleanPrepId))
+    );
 
     const details = rawDetails.map((rd) => {
-      const ing = ingredients.find((i) => i.id === rd.ingredient_id);
+      const ing = ingredients.find(
+        (i) =>
+          String(i.id).trim().toLowerCase() === String(rd.ingredient_id).trim().toLowerCase() ||
+          String(i.code).trim().toLowerCase() === String(rd.ingredient_id).trim().toLowerCase()
+      );
       const unit = units.find((u) => u.id === ing?.unit_id);
       return {
         ...rd,
@@ -2061,20 +2117,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     prepIngredientId: string,
     details: Array<{ ingredient_id: string; quantity: number }>
   ) => {
-    const canonicalRecipeId = `rec-prep-${prepIngredientId}`;
+    const cleanPrepId = String(prepIngredientId).trim();
+    const canonicalRecipeId = `rec-prep-${cleanPrepId}`;
     const recipeObj: Recipe = {
       id: canonicalRecipeId,
-      menu_id: prepIngredientId,
+      menu_id: cleanPrepId,
       version: 1,
       is_active: true,
-      notes: `Formula Prepare Standard ${prepIngredientId}`,
+      notes: `Formula Prepare Standard ${cleanPrepId}`,
       created_at: new Date().toISOString(),
     };
 
     const uniqueDetailsMap = new Map<string, number>();
     for (const d of details) {
       if (d.ingredient_id && Number(d.quantity) > 0) {
-        uniqueDetailsMap.set(d.ingredient_id, Number(d.quantity));
+        uniqueDetailsMap.set(String(d.ingredient_id).trim(), Number(d.quantity));
       }
     }
 
@@ -2084,7 +2141,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }));
 
     const newDetails: RecipeDetail[] = cleanInputDetails.map((item) => ({
-      id: `rd-rec-prep-${prepIngredientId}-${item.ingredient_id}`,
+      id: `rd-rec-prep-${cleanPrepId}-${item.ingredient_id}`,
       recipe_id: canonicalRecipeId,
       ingredient_id: item.ingredient_id,
       quantity: item.quantity,
@@ -2092,15 +2149,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     // 1. Update prepareFormulas state and localStorage
     setPrepareFormulas((prev) => {
-      const next = { ...prev, [prepIngredientId]: cleanInputDetails };
+      const next = { ...prev, [cleanPrepId]: cleanInputDetails };
       saveToStorage(STORAGE_KEYS.PREPARE_FORMULAS, next);
+      try {
+        localStorage.setItem('mecamocha_prepare_formulas_v3', JSON.stringify(next));
+      } catch {}
       return next;
     });
 
     // 2. Update recipes state and localStorage
     setRecipes((prev) => {
       const next = [
-        ...prev.filter((r) => r.menu_id !== prepIngredientId && r.id !== canonicalRecipeId),
+        ...prev.filter((r) => r.menu_id !== cleanPrepId && r.id !== canonicalRecipeId),
         recipeObj,
       ];
       saveToStorage(STORAGE_KEYS.RECIPES, next);
@@ -2110,33 +2170,41 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     // 3. Update recipeDetails state and localStorage
     setRecipeDetails((prev) => {
       const next = sanitizeRecipeDetails([
-        ...prev.filter((rd) => rd && rd.recipe_id !== canonicalRecipeId && !rd.id?.includes(`rec-prep-${prepIngredientId}`)),
+        ...prev.filter((rd) => rd && rd.recipe_id !== canonicalRecipeId && !rd.id?.includes(`rec-prep-${cleanPrepId}`)),
         ...newDetails,
       ]);
       saveToStorage(STORAGE_KEYS.RECIPE_DETAILS, next);
       return next;
     });
 
+    broadcastSync('sync_start');
+
     try {
       const supabase = getSupabase();
       if (supabase) {
-        await supabase.from('recipes').upsert([{
-          id: String(recipeObj.id),
-          menu_id: null,
-          version: 1,
-          is_active: true,
-          notes: recipeObj.notes,
-          created_at: recipeObj.created_at,
-        }]);
+        try {
+          await supabase.from('recipes').upsert([{
+            id: String(recipeObj.id),
+            version: 1,
+            is_active: true,
+            notes: recipeObj.notes,
+            created_at: recipeObj.created_at,
+          }]);
+        } catch {}
 
-        try { await supabase.from('recipe_details').delete().eq('recipe_id', canonicalRecipeId); } catch {}
+        try {
+          await supabase.from('recipe_details').delete().eq('recipe_id', canonicalRecipeId);
+        } catch {}
+
         const cleanDetails = newDetails.map((rd) => ({
           id: String(rd.id),
           recipe_id: String(rd.recipe_id),
           ingredient_id: String(rd.ingredient_id),
           quantity: Number(rd.quantity) || 0,
         }));
-        try { await supabase.from('recipe_details').upsert(cleanDetails); } catch {}
+        try {
+          await supabase.from('recipe_details').upsert(cleanDetails);
+        } catch {}
       }
     } catch (e) {
       console.warn('Error saving prepare formula to Supabase:', e);
