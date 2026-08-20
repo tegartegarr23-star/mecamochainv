@@ -3523,6 +3523,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const ingId = String(ing.id || '').trim().toLowerCase();
       const ingCode = String(ing.code || '').trim().toLowerCase();
 
+      const isIngMatch = (m: StockMovement) => {
+        if (!m || !m.ingredient_id) return false;
+        const mIngId = (typeof m.ingredient_id === 'object' && m.ingredient_id !== null ? String((m.ingredient_id as any).id || '') : String(m.ingredient_id || '')).trim().toLowerCase();
+        return mIngId === ingId || mIngId === ingCode;
+      };
+
       const getMovementDate = (m: StockMovement): string => {
         const trx = transactions.find((t) => {
           if (!t) return false;
@@ -3547,26 +3553,48 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return getYYYYMMDD(new Date().toISOString());
       };
 
+      // All movements for this ingredient sorted chronologically
+      const allIngMovs = stockMovements.filter(isIngMatch);
+      const sortedIngMovs = [...allIngMovs].sort((a, b) => {
+        const dateA = getMovementDate(a);
+        const dateB = getMovementDate(b);
+        if (dateA !== dateB) return dateA.localeCompare(dateB);
+        const timeA = new Date(a.created_at).getTime() || 0;
+        const timeB = new Date(b.created_at).getTime() || 0;
+        if (timeA !== timeB) return timeA - timeB;
+        return String(a.id).localeCompare(String(b.id));
+      });
+
+      // Calculate baseline initial stock before all movements started
+      let baselineInitialStock = liveStock;
+      if (sortedIngMovs.length > 0) {
+        const firstMov = sortedIngMovs[0];
+        if (firstMov.balance_after !== undefined && firstMov.balance_after !== null && !isNaN(Number(firstMov.balance_after))) {
+          const fQty = Number(firstMov.quantity) || 0;
+          const fType = String(firstMov.type || '').toLowerCase();
+          baselineInitialStock = fType === 'in' ? Number(firstMov.balance_after) - fQty : Number(firstMov.balance_after) + fQty;
+        } else {
+          let totalNet = 0;
+          sortedIngMovs.forEach((m) => {
+            const q = Number(m.quantity) || 0;
+            if (String(m.type).toLowerCase() === 'in') totalNet += q;
+            else totalNet -= q;
+          });
+          baselineInitialStock = liveStock - totalNet;
+        }
+      }
+
       // Movements on targetDate or all dates
-      const movementsToday = stockMovements.filter((m) => {
-        if (!m || !m.ingredient_id) return false;
-        const mIngId = (typeof m.ingredient_id === 'object' && m.ingredient_id !== null ? String((m.ingredient_id as any).id || '') : String(m.ingredient_id || '')).trim().toLowerCase();
-        if (mIngId !== ingId && mIngId !== ingCode) return false;
-
+      const movementsToday = sortedIngMovs.filter((m) => {
         if (isAllDates) return true;
-
         const mDate = getMovementDate(m);
         return mDate === targetDate;
       });
 
-      // Movements created BEFORE targetDate (for calculating initial stock at the start of targetDate)
+      // Movements created BEFORE targetDate
       const movementsBefore = isAllDates
         ? []
-        : stockMovements.filter((m) => {
-            if (!m || !m.ingredient_id) return false;
-            const mIngId = (typeof m.ingredient_id === 'object' && m.ingredient_id !== null ? String((m.ingredient_id as any).id || '') : String(m.ingredient_id || '')).trim().toLowerCase();
-            if (mIngId !== ingId && mIngId !== ingCode) return false;
-
+        : sortedIngMovs.filter((m) => {
             const mDate = getMovementDate(m);
             return mDate < targetDate;
           });
@@ -3621,22 +3649,30 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const totalTodayOut = out_prepare + out_production + out_adjustment;
 
       // Initial stock at the beginning of targetDate:
-      // Exactly equals the accumulated net stock of all transactions before targetDate
-      // (Which is identically equal to the final stock of the previous day!)
+      // Exactly equals the final stock of the previous day (or baselineInitialStock if no previous movements)
       let initial_stock = 0;
       if (isAllDates) {
-        // In all dates mode, initial stock is live stock minus total net movements
-        initial_stock = Math.max(0, liveStock - totalTodayIn + totalTodayOut);
+        // In all dates mode, initial stock is baseline stock before any movements
+        initial_stock = Math.max(0, baselineInitialStock);
+      } else if (movementsBefore.length > 0) {
+        const lastBefore = movementsBefore[movementsBefore.length - 1];
+        if (lastBefore.balance_after !== undefined && lastBefore.balance_after !== null && !isNaN(Number(lastBefore.balance_after))) {
+          initial_stock = Number(lastBefore.balance_after);
+        } else {
+          let runningStock = baselineInitialStock;
+          movementsBefore.forEach((m) => {
+            const q = Number(m.quantity) || 0;
+            if (String(m.type).toLowerCase() === 'in') runningStock += q;
+            else runningStock -= q;
+          });
+          initial_stock = runningStock;
+        }
       } else {
-        movementsBefore.forEach((m) => {
-          const mType = String(m.type || '').trim().toLowerCase();
-          const qty = Number(m.quantity) || 0;
-          if (mType === 'in') initial_stock += qty;
-          else if (mType === 'out') initial_stock -= qty;
-        });
+        initial_stock = Math.max(0, baselineInitialStock);
       }
 
-      // Stock at the end of targetDate
+      // Stock at the end of targetDate:
+      // Exactly equals initial_stock + total today in - total today out (carries over seamlessly)
       const final_stock = isAllDates ? liveStock : initial_stock + totalTodayIn - totalTodayOut;
 
       return {
