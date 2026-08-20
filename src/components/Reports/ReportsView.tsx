@@ -101,15 +101,6 @@ export const ReportsView: React.FC = () => {
     if (!input) return todayYMD;
     if (typeof input === 'string') {
       const trimmed = input.trim();
-      if (trimmed.includes('T')) {
-        const d = new Date(trimmed);
-        if (!isNaN(d.getTime())) {
-          const y = d.getFullYear();
-          const m = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          return `${y}-${m}-${day}`;
-        }
-      }
       const matchIso = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
       if (matchIso) {
         return `${matchIso[1]}-${matchIso[2].padStart(2, '0')}-${matchIso[3].padStart(2, '0')}`;
@@ -117,6 +108,13 @@ export const ReportsView: React.FC = () => {
       const matchId = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
       if (matchId) {
         return `${matchId[3]}-${matchId[2].padStart(2, '0')}-${matchId[1].padStart(2, '0')}`;
+      }
+      const d = new Date(trimmed);
+      if (!isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
       }
     }
     const d = new Date(input);

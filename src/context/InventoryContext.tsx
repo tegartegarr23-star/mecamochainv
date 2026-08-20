@@ -75,6 +75,50 @@ export const normalizeIngredientCategory = (ing: Partial<Ingredient>): string =>
   return 'cat-kitchen';
 };
 
+export const getYYYYMMDD = (input: string | Date | undefined | null): string => {
+  if (!input) {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (trimmed === 'all') return 'all';
+    // Check regex YYYY-MM-DD directly FIRST to avoid UTC/local offset shift
+    const matchIso = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (matchIso) {
+      const y = matchIso[1];
+      const m = matchIso[2].padStart(2, '0');
+      const d = matchIso[3].padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    const matchId = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+    if (matchId) {
+      const d = matchId[1].padStart(2, '0');
+      const m = matchId[2].padStart(2, '0');
+      const y = matchId[3];
+      return `${y}-${m}-${d}`;
+    }
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const day = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+  }
+  if (input instanceof Date && !isNaN(input.getTime())) {
+    const y = input.getFullYear();
+    const m = String(input.getMonth() + 1).padStart(2, '0');
+    const day = String(input.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
+
 export interface ParsedProductionSoldItem {
   menu_id: string;
   name: string;
@@ -3081,6 +3125,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const isoDate = createLocalDateTimeIso(date);
     const targetTimestamp = new Date(isoDate).getTime();
 
+    const targetDateYMD = getYYYYMMDD(date);
+
     const newTrx: Transaction = {
       id: trxId,
       type: 'adjustment',
@@ -3095,6 +3141,30 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const newMovements: StockMovement[] = [];
     const updatedIngredients = [...ingredients];
     let updatedStockMovements = [...stockMovements];
+
+    const getMovementDate = (m: StockMovement): string => {
+      const trx = transactions.find((t) => {
+        if (!t) return false;
+        if (m.transaction_id && String(t.id).trim().toLowerCase() === String(m.transaction_id).trim().toLowerCase()) {
+          return true;
+        }
+        if (t.reference_no && m.description && String(m.description).toLowerCase().includes(String(t.reference_no).toLowerCase())) {
+          return true;
+        }
+        return false;
+      });
+
+      if (trx?.transaction_date) {
+        return getYYYYMMDD(trx.transaction_date);
+      }
+      if (m.created_at) {
+        return getYYYYMMDD(m.created_at);
+      }
+      if (trx?.created_at) {
+        return getYYYYMMDD(trx.created_at);
+      }
+      return getYYYYMMDD(new Date().toISOString());
+    };
 
     items.forEach((item, index) => {
       const targetId = String(item.ingredient_id || '').trim().toLowerCase();
@@ -3113,8 +3183,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return mId === realIngId.toLowerCase() || mId === realIngCode;
       };
 
-      // 1. Calculate stock balance of this ingredient up to this adjustment's target date/timestamp
-      const priorMovs = updatedStockMovements.filter((m) => isIngMatch(m) && new Date(m.created_at).getTime() <= targetTimestamp);
+      // 1. Calculate stock balance of this ingredient up to this adjustment's target date
+      // Includes all movements prior to targetDate, and movements on targetDate up to this time
+      const priorMovs = updatedStockMovements.filter((m) => {
+        if (!isIngMatch(m)) return false;
+        const mDate = getMovementDate(m);
+        if (mDate < targetDateYMD) return true;
+        if (mDate === targetDateYMD && new Date(m.created_at).getTime() <= targetTimestamp) return true;
+        return false;
+      });
+
       let stockPriorOnDate = 0;
       priorMovs.forEach((m) => {
         const q = Number(m.quantity) || 0;
@@ -3168,11 +3246,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       // 2. If there are future movements after this date for this ingredient, adjust their balance_after by delta
       if (delta !== 0) {
         updatedStockMovements = updatedStockMovements.map((m) => {
-          if (isIngMatch(m) && new Date(m.created_at).getTime() > targetTimestamp) {
-            return {
-              ...m,
-              balance_after: (Number(m.balance_after) || 0) + delta,
-            };
+          if (isIngMatch(m)) {
+            const mDate = getMovementDate(m);
+            if (mDate > targetDateYMD || (mDate === targetDateYMD && new Date(m.created_at).getTime() > targetTimestamp)) {
+              return {
+                ...m,
+                balance_after: (Number(m.balance_after) || 0) + delta,
+              };
+            }
           }
           return m;
         });
@@ -3378,17 +3459,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (t.reference_no) deletedTrxIdsRef.current.add(String(t.reference_no).trim());
     });
 
-    // Reset all ingredients stock to 0 when clearing all transactions
-    const resetIngredients = ingredients.map((ing) => ({
-      ...ing,
-      current_stock: 0,
-    }));
-
-    setIngredients(resetIngredients);
+    // TIDAK MENGEMBALIKAN STOK:
+    // Stok bahan saat ini tetap pada posisi saat ini, riwayat transaksi & mutasi dibersihkan.
     setTransactions([]);
     setStockMovements([]);
 
-    saveToStorage(STORAGE_KEYS.INGREDIENTS, resetIngredients);
     saveToStorage(STORAGE_KEYS.TRANSACTIONS, []);
     saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, []);
 
@@ -3398,20 +3473,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         await supabase.from('stock_movements').delete().neq('id', '0');
         try { await supabase.from('stock_moved').delete().neq('id', '0'); } catch {}
         await supabase.from('transactions').delete().neq('id', '0');
-
-        const cleanIngs = resetIngredients.map((ing) => ({
-          id: String(ing.id),
-          code: String(ing.code || ''),
-          name: String(ing.name || ''),
-          category_id: ing.category_id ? String(ing.category_id) : null,
-          unit_id: ing.unit_id ? String(ing.unit_id) : null,
-          type: ing.type || 'raw',
-          min_stock: Number(ing.min_stock) || 0,
-          current_stock: 0,
-          is_active: ing.is_active !== false,
-          cost_per_unit: Number(ing.cost_per_unit) || 0,
-        }));
-        await supabase.from('ingredients').upsert(cleanIngs);
       } catch (e) {
         console.warn('Error clearing Supabase transactions:', e);
       }
@@ -3450,54 +3511,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Daily Stock Report Generator
   const getDailyStockReport = (dateFilter: string): DailyStockRow[] => {
-    // Standardize filter date to local YYYY-MM-DD
-    const getYYYYMMDD = (input: string | Date | undefined | null): string => {
-      if (!input) {
-        const d = new Date();
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-      }
-      if (typeof input === 'string') {
-        const trimmed = input.trim();
-        if (trimmed === 'all') return 'all';
-        // If string contains T (ISO timestamp), parse with Date to get LOCAL date
-        if (trimmed.includes('T')) {
-          const d = new Date(trimmed);
-          if (!isNaN(d.getTime())) {
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            return `${y}-${m}-${day}`;
-          }
-        }
-        const matchIso = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-        if (matchIso) {
-          const y = matchIso[1];
-          const m = matchIso[2].padStart(2, '0');
-          const d = matchIso[3].padStart(2, '0');
-          return `${y}-${m}-${d}`;
-        }
-        const matchId = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
-        if (matchId) {
-          const d = matchId[1].padStart(2, '0');
-          const m = matchId[2].padStart(2, '0');
-          const y = matchId[3];
-          return `${y}-${m}-${d}`;
-        }
-      }
-      const d = new Date(input);
-      if (!isNaN(d.getTime())) {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-      }
-      const now = new Date();
-      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    };
-
     const isAllDates = !dateFilter || dateFilter === 'all';
     const targetDate = isAllDates ? 'all' : getYYYYMMDD(dateFilter);
 
@@ -3607,14 +3620,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const totalTodayIn = in_purchase + in_prepare + in_adjustment;
       const totalTodayOut = out_prepare + out_production + out_adjustment;
 
-      // Initial stock at the beginning of targetDate
+      // Initial stock at the beginning of targetDate:
+      // Exactly equals the accumulated net stock of all transactions before targetDate
+      // (Which is identically equal to the final stock of the previous day!)
       let initial_stock = 0;
       if (isAllDates) {
-        // In all dates mode, final stock is live stock, initial stock is live stock minus net movement
+        // In all dates mode, initial stock is live stock minus total net movements
         initial_stock = Math.max(0, liveStock - totalTodayIn + totalTodayOut);
-      } else if (movementsBefore.length === 0 && movementsToday.length === 0) {
-        // If no movements recorded before or on target date, use live stock as baseline
-        initial_stock = liveStock;
       } else {
         movementsBefore.forEach((m) => {
           const mType = String(m.type || '').trim().toLowerCase();

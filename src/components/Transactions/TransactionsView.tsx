@@ -14,6 +14,7 @@ import {
   Building,
   Trash2,
   Sparkles,
+  RotateCcw,
   Info,
   Eye,
   X,
@@ -2271,20 +2272,26 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
               <div>
                 <h3 className="font-bold text-stone-900 text-base font-serif">Kosongkan Seluruh Riwayat Transaksi?</h3>
                 <p className="text-xs text-stone-500 mt-1">
-                  Seluruh data riwayat pergerakan stok, pembelian, prepare, produksi, dan penyesuaian akan dihapus bersih dari sistem dan Supabase.
+                  Seluruh data riwayat transaksi dan log mutasi stok akan dibersihkan dari sistem dan Supabase.
                 </p>
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 font-medium mb-5">
-              ⚠️ Tindakan ini tidak dapat dibatalkan. Pastikan Anda telah menyimpan laporan atau data pendukung yang diperlukan.
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 mb-5">
+              <p className="font-bold mb-1">⚠️ Catatan: Tidak Mengembalikan Stok Bahan</p>
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                Tindakan ini <strong>TIDAK mengembalikan (tidak me-restock) stok bahan</strong>. Posisi stok bahan saat ini akan tetap sama seperti sekarang.
+              </p>
+              <p className="text-[10.5px] text-amber-700 mt-1.5 italic">
+                *Jika Anda ingin membatalkan transaksi dan mengembalikan stoknya, gunakan tombol <strong>Hapus</strong> di samping rincian per baris transaksi.
+              </p>
             </div>
 
-            <div className="flex items-center justify-end gap-2">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-stone-100">
               <button
                 type="button"
                 onClick={() => setShowClearAllModal(false)}
-                className="px-4 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold transition-all"
+                className="px-4 py-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold transition-all text-center"
               >
                 Batal
               </button>
@@ -2293,13 +2300,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                 onClick={async () => {
                   await clearAllTransactions();
                   setShowClearAllModal(false);
-                  setToastMsg('Seluruh riwayat transaksi berhasil dikosongkan.');
+                  setToastMsg('Seluruh riwayat transaksi telah dikosongkan. Stok bahan saat ini tetap dipertahankan.');
                   setTimeout(() => setToastMsg(null), 4000);
                 }}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
               >
                 <Trash2 className="w-4 h-4" />
-                <span>Ya, Kosongkan Semua</span>
+                <span>Ya, Kosongkan Riwayat</span>
               </button>
             </div>
           </div>
