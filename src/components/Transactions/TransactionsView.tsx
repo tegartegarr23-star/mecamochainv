@@ -53,6 +53,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
     clearAllTransactions,
     getPrepareFormula,
     savePrepareFormula,
+    reconcileAllHistoricalData,
   } = useInventory();
 
   // Active Tab: History vs New Transaction Forms
@@ -69,6 +70,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   const [selectedTrxForDelete, setSelectedTrxForDelete] = useState<Transaction | null>(null);
   const [showClearAllModal, setShowClearAllModal] = useState<boolean>(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [isReconciling, setIsReconciling] = useState<boolean>(false);
 
   useEffect(() => {
     if (initialAction) {
@@ -1651,15 +1653,41 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                 </button>
 
                 {transactions.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowClearAllModal(true)}
-                    className="px-2.5 py-1 rounded-lg text-xs font-bold transition-all bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 flex items-center gap-1 ml-auto"
-                    title="Hapus seluruh riwayat transaksi"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                    <span>Kosongkan Riwayat</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 ml-auto">
+                    <button
+                      type="button"
+                      disabled={isReconciling}
+                      onClick={async () => {
+                        setIsReconciling(true);
+                        try {
+                          const res = await reconcileAllHistoricalData();
+                          setToastMsg(
+                            res.repairedCount > 0
+                              ? `Berhasil sinkronisasi! ${res.repairedCount} transaksi telah dipasangkan dengan potongan bahan baku otomatis.`
+                              : 'Semua transaksi riwayat sudah sinkron dan seluruh bahan baku telah terpotong dengan tepat.'
+                          );
+                        } catch (e) {
+                          setToastMsg('Gagal menyinkronkan transaksi.');
+                        } finally {
+                          setIsReconciling(false);
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg text-xs font-bold transition-all bg-amber-50 text-amber-900 hover:bg-amber-100 border border-amber-300 flex items-center gap-1 shadow-2xs disabled:opacity-50"
+                      title="Hitung ulang dan sinkronkan potongan bahan baku dari seluruh riwayat penjualan"
+                    >
+                      <Sparkles className={`w-3.5 h-3.5 text-amber-600 ${isReconciling ? 'animate-spin' : ''}`} />
+                      <span>{isReconciling ? 'Menyinkronkan...' : 'Sinkronkan Potongan Bahan'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowClearAllModal(true)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-bold transition-all bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 flex items-center gap-1"
+                      title="Hapus seluruh riwayat transaksi"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Kosongkan Riwayat</span>
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -1761,6 +1789,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                         ? soldItems.map((s) => `${s.count} porsi ${s.name}`).join(', ')
                         : (trx.menu_id ? `${trx.portion_count || 1} porsi ${menus.find(m => m.id === trx.menu_id)?.name || 'Menu'}` : `${trx.portion_count || 1} porsi Menu`);
 
+                      const deductedList = trxMovs.map((m) => {
+                        const ing = ingredients.find(
+                          (i) => i.id === m.ingredient_id || i.code === m.ingredient_id
+                        );
+                        const unit = units.find((u) => u.id === ing?.unit_id);
+                        return `${ing?.name || 'Bahan'}: ${Number(m.quantity || 0).toLocaleString('id-ID')} ${unit?.abbreviation || ''}`.trim();
+                      });
+
                       detailContent = (
                         <div className="space-y-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
@@ -1772,12 +1808,19 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                               Total {totalSoldPortions} Porsi
                             </span>
                           </div>
-                          <p className="text-[11px] text-stone-500 flex items-center gap-1">
-                            <span>📉 Memotong {trxMovs.length} bahan baku</span>
-                            {trx.notes && !trx.notes.includes(soldSummaryText) && (
-                              <span className="italic text-stone-400">• {trx.notes}</span>
+                          <div className="text-[11px] text-stone-600">
+                            <p className="flex items-center gap-1 font-medium text-stone-700">
+                              <span>📉 Memotong {trxMovs.length} bahan baku:</span>
+                            </p>
+                            {deductedList.length > 0 && (
+                              <p className="text-[10.5px] text-stone-500 line-clamp-2 mt-0.5">
+                                {deductedList.join(' • ')}
+                              </p>
                             )}
-                          </p>
+                            {trx.notes && !trx.notes.includes(soldSummaryText) && (
+                              <p className="italic text-stone-400 text-[10px] mt-0.5">• {trx.notes}</p>
+                            )}
+                          </div>
                         </div>
                       );
                     } else if (trx.type === 'adjustment') {

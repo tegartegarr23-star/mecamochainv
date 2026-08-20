@@ -111,6 +111,7 @@ export const BEVERAGE_MENUS: Menu[] = [
   { id: 'mn-146', name: 'Vanilla Latte Hot', category: 'Coffee', price: 28000, is_active: true, active_recipe_version: 1 },
   { id: 'mn-147', name: 'Caramel Latte Hot', category: 'Coffee', price: 28000, is_active: true, active_recipe_version: 1 },
   { id: 'mn-148', name: 'Caramel Macchiato', category: 'Coffee', price: 32000, is_active: true, active_recipe_version: 1 },
+  { id: 'mn-air', name: 'Air Mineral', category: 'Non-Coffee', price: 8000, is_active: true, active_recipe_version: 1 },
 
   // Prepared Formulations (Half-Finished PP)
   { id: 'mn-201', name: 'Formula PP Kopsu', category: 'PP Formula', price: 0, is_active: true, active_recipe_version: 1 },
@@ -172,6 +173,7 @@ export const BEVERAGE_RECIPES: Recipe[] = [
   { id: 'rec-mn146', menu_id: 'mn-146', version: 1, is_active: true, notes: 'Vanilla Latte Hot' },
   { id: 'rec-mn147', menu_id: 'mn-147', version: 1, is_active: true, notes: 'Caramel Latte Hot' },
   { id: 'rec-mn148', menu_id: 'mn-148', version: 1, is_active: true, notes: 'Caramel Macchiato' },
+  { id: 'rec-mnair', menu_id: 'mn-air', version: 1, is_active: true, notes: 'Air Mineral' },
 
   // Prepared Recipes
   { id: 'rec-mn201', menu_id: 'mn-201', version: 1, is_active: true, notes: 'Formula PP Kopsu' },
@@ -546,6 +548,11 @@ export const BEVERAGE_RECIPE_DETAILS: RecipeDetail[] = [
   { id: 'rd-b148-6', recipe_id: 'rec-mn148', ingredient_id: 'ing-ppb02', quantity: 20 },
   { id: 'rd-b148-7', recipe_id: 'rec-mn148', ingredient_id: 'ing-cul', quantity: 1 },
   { id: 'rd-b148-8', recipe_id: 'rec-mn148', ingredient_id: 'ing-cui', quantity: 1 },
+
+  // MN-AIR: Air Mineral
+  { id: 'rd-b-air-1', recipe_id: 'rec-mnair', ingredient_id: 'ing-gac', quantity: 330 },
+  { id: 'rd-b-air-2', recipe_id: 'rec-mnair', ingredient_id: 'ing-cui', quantity: 1 },
+  { id: 'rd-b-air-3', recipe_id: 'rec-mnair', ingredient_id: 'ing-cul', quantity: 1 },
 
   // MN201: Formula PP Kopsu
   { id: 'rd-b201-1', recipe_id: 'rec-mn201', ingredient_id: 'ing-kri', quantity: 25 },

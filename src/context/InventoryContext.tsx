@@ -29,8 +29,201 @@ import {
   INITIAL_TRANSACTIONS,
   INITIAL_STOCK_MOVEMENTS,
 } from '../data/seedData';
+import { BEVERAGE_INGREDIENTS } from '../data/beverageSeed';
 import { generateRefNo, createLocalDateTimeIso } from '../utils/formatters';
 import { getSupabase } from '../lib/supabase';
+
+export const STANDARD_CATEGORIES: Category[] = [
+  { id: 'cat-kitchen', name: 'Kitchen' },
+  { id: 'cat-bar', name: 'Bar' },
+];
+
+export const normalizeIngredientCategory = (ing: Partial<Ingredient>): string => {
+  if (!ing) return 'cat-kitchen';
+  const code = String(ing.code || '').trim().toUpperCase();
+  const id = String(ing.id || '').trim().toLowerCase();
+
+  // Rule 1: Code starts with MM (e.g. MM001 to MM110) or id starts with ing-mm -> Kitchen
+  if (code.startsWith('MM') || id.startsWith('ing-mm')) {
+    return 'cat-kitchen';
+  }
+  // Rule 2: Code starts with PP and digits (e.g. PP001 to PP022, not PPB) -> Kitchen
+  if (/^PP\d+/i.test(code) || /^ing-pp\d+/i.test(id)) {
+    return 'cat-kitchen';
+  }
+  // Rule 3: Code starts with PPB (PP Bar) -> Bar
+  if (code.startsWith('PPB') || id.startsWith('ing-ppb')) {
+    return 'cat-bar';
+  }
+  // Rule 4: Beverage codes -> Bar
+  const beverageCodes = new Set([
+    'HOU', 'KRI', 'FRM', 'CUI', 'CUL', 'ACP', 'GRE', 'SKG', 'GAC', 'SHI', 'SES', 'MIB', 'MAT',
+    'TOC', 'MAV', 'TOB', 'WHS', 'GAF', 'DRC', 'TEP', 'TEG', 'TED', 'TEJ', 'SCT', 'ARV', 'AST',
+    'SAN', 'CRC', 'BTL', 'MOC', 'MAL', 'TOP', 'FAN', 'MAN', 'MAS', 'MAM', 'PUM', 'TOS', 'BUL',
+    'CRM', 'STW', 'MAL01', 'DIB', 'TOC01', 'TET', 'GUA', 'EGW', 'PPB01', 'PPB02', 'PPB03',
+    'PPB04', 'PPB05', 'PPB06', 'PPB07', 'PPB08', 'PPB09'
+  ]);
+  if (beverageCodes.has(code) || BEVERAGE_INGREDIENTS.some((b) => b.id === id || b.code.toUpperCase() === code)) {
+    return 'cat-bar';
+  }
+
+  // Preserve if explicitly cat-kitchen or cat-bar
+  if (ing.category_id === 'cat-kitchen' || ing.category_id === 'cat-bar') {
+    return ing.category_id;
+  }
+
+  return 'cat-kitchen';
+};
+
+export const reconcileHistoricalTransactionsAndMovements = (
+  rawTransactions: Transaction[],
+  rawMovements: StockMovement[],
+  rawIngredients: Ingredient[],
+  rawRecipeDetails: RecipeDetail[],
+  rawRecipes: Recipe[],
+  rawMenus: Menu[],
+  rawPrepareFormulas: Record<string, Array<{ ingredient_id: string; quantity: number }>> = {}
+) => {
+  let repairedCount = 0;
+  const newMovements: StockMovement[] = [];
+  const existingMovements = [...rawMovements];
+
+  // Helper to find recipe details for a menu
+  const getDetailsForMenu = (menuId: string): RecipeDetail[] => {
+    const possibleRecipeIds = new Set<string>([
+      `rec-${menuId}`,
+      `rec-${menuId.replace('-', '')}`,
+      menuId,
+    ]);
+    rawRecipes.filter((r) => r.menu_id === menuId).forEach((r) => possibleRecipeIds.add(r.id));
+    INITIAL_RECIPES.filter((r) => r.menu_id === menuId).forEach((r) => possibleRecipeIds.add(r.id));
+
+    let details = rawRecipeDetails.filter((rd) => rd && rd.recipe_id && possibleRecipeIds.has(rd.recipe_id));
+    if (details.length === 0) {
+      details = INITIAL_RECIPE_DETAILS.filter((rd) => rd && rd.recipe_id && possibleRecipeIds.has(rd.recipe_id));
+    }
+    return details;
+  };
+
+  // Helper to match menu from text or id
+  const findMenu = (identifier: string): Menu | undefined => {
+    if (!identifier) return undefined;
+    const clean = identifier.trim().toLowerCase();
+    return (
+      rawMenus.find((m) => m.id.toLowerCase() === clean || m.name.toLowerCase() === clean) ||
+      INITIAL_MENUS.find((m) => m.id.toLowerCase() === clean || m.name.toLowerCase() === clean)
+    );
+  };
+
+  // Iterate over transactions
+  const updatedTransactions = rawTransactions.map((trx) => {
+    const trxMovs = existingMovements.filter(
+      (m) =>
+        m.transaction_id === trx.id ||
+        (trx.reference_no && m.description && m.description.includes(trx.reference_no))
+    );
+
+    if (trx.type === 'production' && trxMovs.length === 0) {
+      // Find sold items
+      let soldItems: Array<{ menu_id: string; portion_count: number }> = [];
+
+      if (trx.production_items && trx.production_items.length > 0) {
+        soldItems = trx.production_items.filter((p) => p.menu_id && Number(p.portion_count) > 0);
+      } else if (trx.menu_id && Number(trx.portion_count) > 0) {
+        soldItems = [{ menu_id: trx.menu_id, portion_count: Number(trx.portion_count) }];
+      } else if (trx.notes) {
+        // Parse notes, e.g. "Terjual 2 porsi Nasi Goreng, 1 porsi Es Teh" or "2 porsi Nasi Goreng" or "Nasi Goreng (2)"
+        for (const menu of rawMenus) {
+          const menuNameLower = menu.name.toLowerCase();
+          const notesLower = trx.notes.toLowerCase();
+          if (notesLower.includes(menuNameLower)) {
+            // Check if there's a portion count near the name
+            const pattern = new RegExp(`(\\d+)\\s*(?:porsi|x)?\\s+${menu.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
+            const match = notesLower.match(pattern);
+            const count = match ? parseInt(match[1], 10) : (trx.portion_count || 1);
+            soldItems.push({ menu_id: menu.id, portion_count: count });
+          }
+        }
+      }
+
+      if (soldItems.length > 0) {
+        let generatedForThisTrx = 0;
+        soldItems.forEach((item, itemIdx) => {
+          const menu = findMenu(item.menu_id);
+          const details = getDetailsForMenu(item.menu_id);
+          details.forEach((d, dIdx) => {
+            const qty = Number(d.quantity) * Number(item.portion_count);
+            if (qty > 0) {
+              const movId = `mov-reconciled-${trx.id}-${itemIdx}-${dIdx}`;
+              const newMov: StockMovement = {
+                id: movId,
+                transaction_id: trx.id,
+                ingredient_id: d.ingredient_id,
+                type: 'out',
+                quantity: qty,
+                balance_after: 0, // calculated below
+                description: `Penjualan ${item.portion_count} porsi ${menu ? menu.name : 'Menu'} (${trx.reference_no})`,
+                created_at: trx.transaction_date || trx.created_at || new Date().toISOString(),
+              };
+              newMovements.push(newMov);
+              existingMovements.push(newMov);
+              generatedForThisTrx++;
+            }
+          });
+        });
+        if (generatedForThisTrx > 0) {
+          repairedCount++;
+        }
+      }
+    }
+
+    return trx;
+  });
+
+  // Combine and sort all movements chronologically ascending
+  const allMovements = [...existingMovements].sort((a, b) => {
+    const timeA = new Date(a.created_at).getTime() || 0;
+    const timeB = new Date(b.created_at).getTime() || 0;
+    if (timeA !== timeB) return timeA - timeB;
+    return String(a.id).localeCompare(String(b.id));
+  });
+
+  // Calculate sequential running stock balances
+  const runningStock = new Map<string, number>();
+  const finalMovements = allMovements.map((mov) => {
+    const ingKey = String(mov.ingredient_id).trim().toLowerCase();
+    const current = runningStock.get(ingKey) || 0;
+    const qty = Number(mov.quantity) || 0;
+    const nextBal = mov.type === 'in' ? current + qty : current - qty;
+    runningStock.set(ingKey, nextBal);
+    return {
+      ...mov,
+      balance_after: nextBal,
+    };
+  });
+
+  // Update ingredients with normalized categories and calculated stock
+  const reconciledIngredients = rawIngredients.map((ing) => {
+    const idKey = String(ing.id).trim().toLowerCase();
+    const codeKey = String(ing.code || '').trim().toLowerCase();
+    const computedStock = runningStock.has(idKey)
+      ? runningStock.get(idKey)!
+      : (codeKey && runningStock.has(codeKey) ? runningStock.get(codeKey)! : (Number(ing.current_stock) || 0));
+
+    return {
+      ...ing,
+      category_id: normalizeIngredientCategory(ing),
+      current_stock: computedStock,
+    };
+  });
+
+  return {
+    reconciledTransactions: updatedTransactions,
+    reconciledMovements: finalMovements,
+    reconciledIngredients,
+    repairedCount,
+  };
+};
 
 interface ProductionSufficiencyResult {
   isSufficient: boolean;
@@ -127,6 +320,9 @@ interface InventoryContextType {
   getDailyStockReport: (dateFilter: string) => DailyStockRow[];
   getIngredientLedger: (ingredientId: string) => StockMovement[];
 
+  // Reconciliation & Repair
+  reconcileAllHistoricalData: () => Promise<{ success: boolean; repairedCount: number }>;
+
   // Utility
   resetToDefaultData: () => void;
   generateSupabaseSQL: () => string;
@@ -212,19 +408,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [currentUser, setCurrentUser] = useState<AppUser>(() => loadFromStorage(STORAGE_KEYS.CURRENT_USER, INITIAL_USERS[0]));
   const [units, setUnits] = useState<Unit[]>(() => loadFromStorage(STORAGE_KEYS.UNITS, INITIAL_UNITS));
   const [categories, setCategories] = useState<Category[]>(() => {
-    const loaded = loadFromStorage(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES);
-    const filtered = (loaded && loaded.length > 0 ? loaded : INITIAL_CATEGORIES).filter((c) => {
+    const loaded = loadFromStorage(STORAGE_KEYS.CATEGORIES, STANDARD_CATEGORIES);
+    const valid = (loaded && loaded.length > 0 ? loaded : STANDARD_CATEGORIES).filter((c) => {
       const name = (c.name || '').toLowerCase();
-      return name.includes('kitchen') || name.includes('bar') || c.id === 'cat-kitchen' || c.id === 'cat-bar';
+      return name === 'kitchen' || name === 'bar' || c.id === 'cat-kitchen' || c.id === 'cat-bar';
     });
-    return filtered.length > 0 ? filtered : INITIAL_CATEGORIES;
+    return valid.length > 0 ? valid : STANDARD_CATEGORIES;
   });
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => loadFromStorage(STORAGE_KEYS.SUPPLIERS, INITIAL_SUPPLIERS));
   const [ingredients, setIngredients] = useState<Ingredient[]>(() => {
     const loaded = loadFromStorage(STORAGE_KEYS.INGREDIENTS, INITIAL_INGREDIENTS);
     const deletedIds = getSavedDeletedIngIds();
-    if (!deletedIds || deletedIds.size === 0) return loaded;
-    return loaded.filter((ing) => {
+    const active = (!deletedIds || deletedIds.size === 0) ? loaded : loaded.filter((ing) => {
       const idStr = String(ing.id).trim();
       const codeStr = String(ing.code || '').trim();
       return (
@@ -233,6 +428,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         (!codeStr || (!deletedIds.has(codeStr) && !deletedIds.has(codeStr.toLowerCase())))
       );
     });
+    return active.map((ing) => ({
+      ...ing,
+      category_id: normalizeIngredientCategory(ing),
+    }));
   });
   const [menus, setMenus] = useState<Menu[]>(() => {
     const loaded = loadFromStorage(STORAGE_KEYS.MENUS, INITIAL_MENUS);
@@ -1153,6 +1352,49 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Auto Sync on Mount, Realtime Subscription & Polling for Multi-Device Consistency
   useEffect(() => {
+    // 0. Auto-reconcile historical stock deductions and standardize categories on mount
+    try {
+      const hasUnreconciled = transactions.some((t) => {
+        if (t.type !== 'production') return false;
+        const movs = stockMovements.filter(
+          (m) =>
+            m.transaction_id === t.id ||
+            (t.reference_no && m.description && m.description.includes(t.reference_no))
+        );
+        return movs.length === 0;
+      });
+
+      const hasUnnormalizedCategories = ingredients.some(
+        (ing) => ing.category_id !== normalizeIngredientCategory(ing)
+      );
+
+      if (hasUnreconciled || hasUnnormalizedCategories) {
+        const {
+          reconciledTransactions,
+          reconciledMovements,
+          reconciledIngredients,
+        } = reconcileHistoricalTransactionsAndMovements(
+          transactions,
+          stockMovements,
+          ingredients,
+          recipeDetails,
+          recipes,
+          menus,
+          prepareFormulas
+        );
+
+        setTransactions(reconciledTransactions);
+        setStockMovements(reconciledMovements);
+        setIngredients(reconciledIngredients);
+
+        saveToStorage(STORAGE_KEYS.TRANSACTIONS, reconciledTransactions);
+        saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, reconciledMovements);
+        saveToStorage(STORAGE_KEYS.INGREDIENTS, reconciledIngredients);
+      }
+    } catch (e) {
+      console.warn('Initial reconciliation notice:', e);
+    }
+
     // 1. Pull from Supabase directly on startup
     pullFromSupabase();
 
@@ -1432,7 +1674,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       id: `ing-${Date.now()}`,
       code: ingData.code || `ING-${Math.floor(100 + Math.random() * 900)}`,
       name: ingData.name,
-      category_id: ingData.category_id,
+      category_id: normalizeIngredientCategory(ingData),
       unit_id: ingData.unit_id,
       type: ingData.type,
       min_stock: ingData.min_stock,
@@ -1494,7 +1736,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         id: ingId,
         code: ingData.code || `ING-${Math.floor(1000 + Math.random() * 9000)}`,
         name: ingData.name,
-        category_id: ingData.category_id || '',
+        category_id: normalizeIngredientCategory(ingData),
         unit_id: ingData.unit_id || '',
         type: ingData.type || 'raw',
         min_stock: ingData.min_stock || 0,
@@ -1547,7 +1789,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setIngredients((prev) => {
       const next = prev.map((item) => {
         if (item.id === id) {
-          updatedItem = { ...item, ...ing };
+          const merged = { ...item, ...ing };
+          updatedItem = {
+            ...merged,
+            category_id: normalizeIngredientCategory(merged),
+          };
           return updatedItem;
         }
         return item;
@@ -2986,6 +3232,36 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
+  const reconcileAllHistoricalData = async (): Promise<{ success: boolean; repairedCount: number }> => {
+    const {
+      reconciledTransactions,
+      reconciledMovements,
+      reconciledIngredients,
+      repairedCount,
+    } = reconcileHistoricalTransactionsAndMovements(
+      transactions,
+      stockMovements,
+      ingredients,
+      recipeDetails,
+      recipes,
+      menus,
+      prepareFormulas
+    );
+
+    setTransactions(reconciledTransactions);
+    setStockMovements(reconciledMovements);
+    setIngredients(reconciledIngredients);
+
+    saveToStorage(STORAGE_KEYS.TRANSACTIONS, reconciledTransactions);
+    saveToStorage(STORAGE_KEYS.STOCK_MOVEMENTS, reconciledMovements);
+    saveToStorage(STORAGE_KEYS.INGREDIENTS, reconciledIngredients);
+
+    // Sync to Supabase in background
+    syncDataToSupabase(reconciledIngredients, undefined, reconciledMovements, reconciledTransactions, reconciledMovements);
+
+    return { success: true, repairedCount };
+  };
+
   // Daily Stock Report Generator
   const getDailyStockReport = (dateFilter: string): DailyStockRow[] => {
     // Standardize filter date to local YYYY-MM-DD
@@ -3501,6 +3777,8 @@ ${recipeDetailInserts ? `INSERT INTO public.recipe_details (id, recipe_id, ingre
 
         getDailyStockReport,
         getIngredientLedger,
+
+        reconcileAllHistoricalData,
 
         resetToDefaultData,
         generateSupabaseSQL,
