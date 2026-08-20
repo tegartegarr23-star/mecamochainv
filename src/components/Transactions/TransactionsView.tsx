@@ -20,7 +20,7 @@ import {
   Search,
   Utensils,
 } from 'lucide-react';
-import { useInventory } from '../../context/InventoryContext';
+import { useInventory, parseSoldItemsFromNotes } from '../../context/InventoryContext';
 import { SearchableIngredientSelect } from '../Common/SearchableIngredientSelect';
 import { SearchableMenuSelect } from '../Common/SearchableMenuSelect';
 import {
@@ -465,61 +465,55 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
   const yesterdayYMD = getDateDaysAgo(1);
 
   const getProductionSoldItems = (trx: Transaction, trxMovs: StockMovement[]) => {
-    const menuMap = new Map<string, number>();
+    // 1. First priority: parse directly from notes using universal parser if it has multi-menu info
+    const parsedNotes = parseSoldItemsFromNotes(trx.notes, menus);
+    if (parsedNotes.length > 1) {
+      return parsedNotes.map((p) => ({ name: p.name, count: p.portion_count }));
+    }
 
-    // 1. Check direct production_items on Transaction object
+    // 2. Second priority: direct production_items on Transaction object
     if (trx.production_items && Array.isArray(trx.production_items) && trx.production_items.length > 0) {
+      const itemsMap = new Map<string, number>();
       for (const item of trx.production_items) {
         if (!item.menu_id) continue;
         const menu = menus.find((m) => m.id === item.menu_id || m.name.toLowerCase() === item.menu_id.toLowerCase());
         const name = menu ? menu.name : item.menu_id;
-        menuMap.set(name, (menuMap.get(name) || 0) + (Number(item.portion_count) || 1));
+        itemsMap.set(name, (itemsMap.get(name) || 0) + (Number(item.portion_count) || 1));
       }
-      if (menuMap.size > 0) {
-        return Array.from(menuMap.entries()).map(([name, count]) => ({ name, count }));
+      if (itemsMap.size > 0) {
+        return Array.from(itemsMap.entries()).map(([name, count]) => ({ name, count }));
       }
     }
 
-    // 2. Extract from stock movements descriptions (all movements for this transaction)
+    // 3. Fallback to single item from parsed notes
+    if (parsedNotes.length === 1) {
+      return parsedNotes.map((p) => ({ name: p.name, count: p.portion_count }));
+    }
+
+    // 4. Extract from stock movements descriptions (all movements for this transaction)
+    const moveMap = new Map<string, number>();
     for (const m of trxMovs) {
       if (m.description) {
         const match = m.description.match(/(?:Penjualan|Produksi)\s+([\d.]+)\s+porsi\s+(.+?)(?:\s+\(|$)/i);
         if (match) {
           const qty = parseFloat(match[1]) || 1;
           const name = match[2].trim();
-          menuMap.set(name, qty);
+          moveMap.set(name, qty);
         }
       }
     }
-
-    // 3. Extract from transaction notes if available
-    if (menuMap.size === 0 && trx.notes) {
-      const matchTerjual = trx.notes.match(/(?:Terjual|Penjualan)\s*:\s*([^)]+)/i) || trx.notes.match(/Terjual\s+([^)]+)/i);
-      const targetStr = matchTerjual ? matchTerjual[1] : trx.notes;
-      const parts = targetStr.split(',');
-      for (const part of parts) {
-        const match = part.match(/([\d.]+)\s*porsi\s*([^(\]]+)/i) || part.match(/([\d.]+)\s*x\s*([^(\]]+)/i);
-        if (match) {
-          const name = match[2].trim();
-          const qty = parseFloat(match[1]) || 1;
-          if (name && !name.toLowerCase().includes('menu item')) {
-            menuMap.set(name, qty);
-          }
-        }
-      }
+    if (moveMap.size > 0) {
+      return Array.from(moveMap.entries()).map(([name, count]) => ({ name, count }));
     }
 
-    // 4. Fallback to trx.menu_id
-    if (menuMap.size === 0 && trx.menu_id) {
+    // 5. Fallback to trx.menu_id
+    if (trx.menu_id) {
       const menu = menus.find((m) => m.id === trx.menu_id || m.name === trx.menu_id);
       const name = menu ? menu.name : 'Menu';
-      menuMap.set(name, trx.portion_count || 1);
+      return [{ name, count: Number(trx.portion_count) || 1 }];
     }
 
-    return Array.from(menuMap.entries()).map(([name, count]) => ({
-      name,
-      count,
-    }));
+    return [];
   };
 
   const filteredTransactions = transactions.filter((t) => {
@@ -1763,20 +1757,35 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                       );
                     } else if (trx.type === 'prepare') {
                       const targetMov = trxMovs.find((m) => m.type === 'in');
-                      const targetIng = ingredients.find((i) => i.id === targetMov?.ingredient_id || i.code === targetMov?.ingredient_id);
+                      let targetIng = ingredients.find((i) => i.id === targetMov?.ingredient_id || i.code === targetMov?.ingredient_id);
+                      if (!targetIng && trx.notes) {
+                        targetIng = ingredients.find((i) => i.type === 'prepared' && trx.notes?.toLowerCase().includes(i.name.toLowerCase()));
+                      }
+                      if (!targetIng) {
+                        targetIng =
+                          ingredients.find((i) => i.type === 'prepared' && (i.id === 'ing-ppb-kopsu' || i.name.toLowerCase().includes('kopsu'))) ||
+                          ingredients.find((i) => i.type === 'prepared');
+                      }
                       const targetUnit = units.find((u) => u.id === targetIng?.unit_id);
                       const sourceCount = trxMovs.filter((m) => m.type === 'out').length;
                       const targetName = targetIng ? targetIng.name : 'Bahan PP';
+                      let targetQty = targetMov?.quantity || 0;
+                      if (targetQty === 0 && trx.notes) {
+                        const qMatch = trx.notes.match(/([\d.]+)\s*(?:ml|g|gram|kg|l|liter|unit)?/i);
+                        if (qMatch) targetQty = parseFloat(qMatch[1]) || 1000;
+                      }
+                      if (targetQty === 0) targetQty = 1000;
+
                       detailContent = (
                         <div className="space-y-0.5">
                           <div className="font-bold text-stone-900 flex items-center gap-1.5 flex-wrap">
                             <span>🍳 Prepare: {targetName}</span>
                             <span className="text-[10px] font-bold text-blue-800 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
-                              +{formatNumber(targetMov?.quantity || 0)} {targetUnit?.abbreviation || 'unit'}
+                              +{formatNumber(targetQty)} {targetUnit?.abbreviation || 'unit'}
                             </span>
                           </div>
                           <p className="text-[11px] text-stone-500">
-                            Mengonversi dari {sourceCount} jenis bahan mentah{trx.notes ? ` • ${trx.notes}` : ''}
+                            Mengonversi dari {sourceCount > 0 ? sourceCount : 'beberapa'} jenis bahan mentah{trx.notes ? ` • ${trx.notes}` : ''}
                           </p>
                         </div>
                       );

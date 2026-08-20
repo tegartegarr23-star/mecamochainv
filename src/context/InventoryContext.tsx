@@ -75,6 +75,100 @@ export const normalizeIngredientCategory = (ing: Partial<Ingredient>): string =>
   return 'cat-kitchen';
 };
 
+export interface ParsedProductionSoldItem {
+  menu_id: string;
+  name: string;
+  portion_count: number;
+}
+
+export const parseSoldItemsFromNotes = (
+  notes: string | undefined | null,
+  availableMenus: Menu[] = []
+): ParsedProductionSoldItem[] => {
+  if (!notes || typeof notes !== 'string') return [];
+  const cleanNotes = notes.trim();
+  if (!cleanNotes) return [];
+
+  // Extract inner text if wrapped in (Terjual ...) or starts with Terjual / Penjualan
+  let text = cleanNotes;
+  const innerMatch = cleanNotes.match(/\((?:Terjual|Penjualan)\s*:?\s*([^)]+)\)/i);
+  if (innerMatch && innerMatch[1]) {
+    text = innerMatch[1];
+  } else {
+    const segmentMatch = cleanNotes.match(/(?:Terjual|Penjualan)\s*:?\s*([^()]+)/i);
+    if (segmentMatch && segmentMatch[1]) {
+      text = segmentMatch[1];
+    }
+  }
+
+  // Remove leading bullets or dashes
+  text = text.replace(/^[•\-\*\s]+/, '').trim();
+
+  // Split by comma, semicolon, newline, or bullet
+  const parts = text.split(/[,;\n•]+/).map((s) => s.trim()).filter(Boolean);
+  const itemsMap = new Map<string, { menu_id: string; name: string; portion_count: number }>();
+
+  const allMenus = [...availableMenus, ...INITIAL_MENUS];
+
+  for (const rawPart of parts) {
+    let part = rawPart.replace(/^(?:Terjual|Penjualan)\s*:?\s*/i, '').trim();
+    if (!part) continue;
+
+    let count = 1;
+    let menuName = '';
+
+    // Regex 1: "6 porsi Snack Platter" or "6x Snack Platter" or "6 Snack Platter"
+    const m1 = part.match(/^([\d.]+)\s*(?:porsi|x|portion|portions)?\s+(.+)$/i);
+    // Regex 2: "Snack Platter: 6 porsi" or "Snack Platter: 6" or "Snack Platter - 6"
+    const m2 = part.match(/^(.+?)\s*[:\-]\s*([\d.]+)\s*(?:porsi|x)?$/i);
+    // Regex 3: "Snack Platter (6 porsi)" or "Snack Platter (6)"
+    const m3 = part.match(/^(.+?)\s*\(\s*([\d.]+)\s*(?:porsi|x)?\s*\)$/i);
+
+    if (m1) {
+      count = parseFloat(m1[1]) || 1;
+      menuName = m1[2].trim();
+    } else if (m2) {
+      menuName = m2[1].trim();
+      count = parseFloat(m2[2]) || 1;
+    } else if (m3) {
+      menuName = m3[1].trim();
+      count = parseFloat(m3[2]) || 1;
+    } else {
+      const matched = allMenus.find((m) => part.toLowerCase().includes(m.name.toLowerCase()));
+      if (matched) {
+        menuName = matched.name;
+        const numMatch = part.match(/([\d.]+)/);
+        count = numMatch ? parseFloat(numMatch[1]) : 1;
+      }
+    }
+
+    if (!menuName) continue;
+    menuName = menuName.replace(/^[(\[]+/, '').replace(/[)\]]+$/, '').trim();
+
+    const cleanNameLower = menuName.toLowerCase();
+    let foundMenu = allMenus.find((m) => m.name.trim().toLowerCase() === cleanNameLower);
+    if (!foundMenu) {
+      foundMenu = allMenus.find((m) => m.name.toLowerCase().includes(cleanNameLower) || cleanNameLower.includes(m.name.toLowerCase()));
+    }
+
+    const menuId = foundMenu ? foundMenu.id : `menu-${menuName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    const displayName = foundMenu ? foundMenu.name : menuName;
+
+    const existing = itemsMap.get(menuId);
+    if (existing) {
+      existing.portion_count += count;
+    } else {
+      itemsMap.set(menuId, {
+        menu_id: menuId,
+        name: displayName,
+        portion_count: count,
+      });
+    }
+  }
+
+  return Array.from(itemsMap.values());
+};
+
 export const reconcileHistoricalTransactionsAndMovements = (
   rawTransactions: Transaction[],
   rawMovements: StockMovement[],
@@ -85,11 +179,10 @@ export const reconcileHistoricalTransactionsAndMovements = (
   rawPrepareFormulas: Record<string, Array<{ ingredient_id: string; quantity: number }>> = {}
 ) => {
   let repairedCount = 0;
-  const newMovements: StockMovement[] = [];
-  const existingMovements = [...rawMovements];
+  let runningMovements = [...rawMovements];
 
   // Helper to find recipe details for a menu
-  const getDetailsForMenu = (menuId: string): RecipeDetail[] => {
+  const getDetailsForMenu = (menuId: string, menuName?: string): RecipeDetail[] => {
     const possibleRecipeIds = new Set<string>([
       `rec-${menuId}`,
       `rec-${menuId.replace('-', '')}`,
@@ -102,76 +195,182 @@ export const reconcileHistoricalTransactionsAndMovements = (
     if (details.length === 0) {
       details = INITIAL_RECIPE_DETAILS.filter((rd) => rd && rd.recipe_id && possibleRecipeIds.has(rd.recipe_id));
     }
+
+    if (details.length === 0 && menuName) {
+      const foundMenu = rawMenus.find((m) => m.name.toLowerCase() === menuName.toLowerCase()) ||
+                        INITIAL_MENUS.find((m) => m.name.toLowerCase() === menuName.toLowerCase());
+      if (foundMenu && foundMenu.id !== menuId) {
+        return getDetailsForMenu(foundMenu.id);
+      }
+    }
     return details;
   };
 
-  // Helper to match menu from text or id
-  const findMenu = (identifier: string): Menu | undefined => {
-    if (!identifier) return undefined;
-    const clean = identifier.trim().toLowerCase();
-    return (
-      rawMenus.find((m) => m.id.toLowerCase() === clean || m.name.toLowerCase() === clean) ||
-      INITIAL_MENUS.find((m) => m.id.toLowerCase() === clean || m.name.toLowerCase() === clean)
-    );
-  };
-
-  // Iterate over transactions
   const updatedTransactions = rawTransactions.map((trx) => {
-    const trxMovs = existingMovements.filter(
-      (m) =>
-        m.transaction_id === trx.id ||
-        (trx.reference_no && m.description && m.description.includes(trx.reference_no))
-    );
+    const isMatchingMov = (m: StockMovement) => {
+      if (!m) return false;
+      if (m.transaction_id && String(m.transaction_id).trim() === String(trx.id).trim()) return true;
+      if (trx.reference_no && m.description && m.description.includes(trx.reference_no)) return true;
+      return false;
+    };
 
-    if (trx.type === 'production' && trxMovs.length === 0) {
-      // Find sold items
-      let soldItems: Array<{ menu_id: string; portion_count: number }> = [];
+    let trxMovs = runningMovements.filter(isMatchingMov);
 
-      if (trx.production_items && trx.production_items.length > 0) {
-        soldItems = trx.production_items.filter((p) => p.menu_id && Number(p.portion_count) > 0);
+    if (trx.type === 'production') {
+      // 1. Determine sold items
+      let soldItems: ParsedProductionSoldItem[] = [];
+
+      const notesSold = parseSoldItemsFromNotes(trx.notes, rawMenus);
+      if (notesSold.length > 1) {
+        soldItems = notesSold;
+      } else if (trx.production_items && Array.isArray(trx.production_items) && trx.production_items.length > 0) {
+        soldItems = trx.production_items.map((pi) => {
+          const m = rawMenus.find((menu) => menu.id === pi.menu_id) || INITIAL_MENUS.find((menu) => menu.id === pi.menu_id);
+          return {
+            menu_id: pi.menu_id,
+            name: m ? m.name : pi.menu_id,
+            portion_count: Number(pi.portion_count) || 1,
+          };
+        });
+      } else if (notesSold.length === 1) {
+        soldItems = notesSold;
       } else if (trx.menu_id && Number(trx.portion_count) > 0) {
-        soldItems = [{ menu_id: trx.menu_id, portion_count: Number(trx.portion_count) }];
-      } else if (trx.notes) {
-        // Parse notes, e.g. "Terjual 2 porsi Nasi Goreng, 1 porsi Es Teh" or "2 porsi Nasi Goreng" or "Nasi Goreng (2)"
-        for (const menu of rawMenus) {
-          const menuNameLower = menu.name.toLowerCase();
-          const notesLower = trx.notes.toLowerCase();
-          if (notesLower.includes(menuNameLower)) {
-            // Check if there's a portion count near the name
-            const pattern = new RegExp(`(\\d+)\\s*(?:porsi|x)?\\s+${menu.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
-            const match = notesLower.match(pattern);
-            const count = match ? parseInt(match[1], 10) : (trx.portion_count || 1);
-            soldItems.push({ menu_id: menu.id, portion_count: count });
-          }
-        }
+        const m = rawMenus.find((menu) => menu.id === trx.menu_id) || INITIAL_MENUS.find((menu) => menu.id === trx.menu_id);
+        soldItems = [{
+          menu_id: trx.menu_id,
+          name: m ? m.name : 'Menu',
+          portion_count: Number(trx.portion_count),
+        }];
       }
 
       if (soldItems.length > 0) {
-        let generatedForThisTrx = 0;
-        soldItems.forEach((item, itemIdx) => {
-          const menu = findMenu(item.menu_id);
-          const details = getDetailsForMenu(item.menu_id);
-          details.forEach((d, dIdx) => {
-            const qty = Number(d.quantity) * Number(item.portion_count);
-            if (qty > 0) {
-              const movId = `mov-reconciled-${trx.id}-${itemIdx}-${dIdx}`;
-              const newMov: StockMovement = {
-                id: movId,
-                transaction_id: trx.id,
-                ingredient_id: d.ingredient_id,
-                type: 'out',
-                quantity: qty,
-                balance_after: 0, // calculated below
-                description: `Penjualan ${item.portion_count} porsi ${menu ? menu.name : 'Menu'} (${trx.reference_no})`,
-                created_at: trx.transaction_date || trx.created_at || new Date().toISOString(),
-              };
-              newMovements.push(newMov);
-              existingMovements.push(newMov);
-              generatedForThisTrx++;
-            }
+        const totalSoldPortions = soldItems.reduce((acc, s) => acc + s.portion_count, 0);
+
+        trx = {
+          ...trx,
+          production_items: soldItems.map((s) => ({ menu_id: s.menu_id, portion_count: s.portion_count })),
+          portion_count: totalSoldPortions,
+        };
+
+        // Check if existing movements only cover 1 menu while we have multiple menus
+        const isSingleMenuMovementWhileMultiItems =
+          soldItems.length > 1 &&
+          trxMovs.length > 0 &&
+          trxMovs.every((m) => {
+            const firstMenu = soldItems[0].name.toLowerCase();
+            return m.description && m.description.toLowerCase().includes(firstMenu);
           });
-        });
-        if (generatedForThisTrx > 0) {
+
+        if (trxMovs.length === 0 || isSingleMenuMovementWhileMultiItems) {
+          // Remove outdated single-menu movements
+          runningMovements = runningMovements.filter((m) => !isMatchingMov(m));
+
+          // Generate accurate movements for EVERY menu in soldItems
+          let movIdx = 0;
+          soldItems.forEach((item) => {
+            const details = getDetailsForMenu(item.menu_id, item.name);
+            details.forEach((d) => {
+              const qty = Number(d.quantity) * Number(item.portion_count);
+              if (qty > 0) {
+                const newMov: StockMovement = {
+                  id: `mov-reconciled-${trx.id}-${movIdx++}`,
+                  transaction_id: trx.id,
+                  ingredient_id: d.ingredient_id,
+                  type: 'out',
+                  quantity: qty,
+                  balance_after: 0,
+                  description: `Penjualan ${item.portion_count} porsi ${item.name} (${trx.reference_no})`,
+                  created_at: trx.transaction_date || trx.created_at || new Date().toISOString(),
+                };
+                runningMovements.push(newMov);
+              }
+            });
+          });
+          repairedCount++;
+        }
+      }
+    } else if (trx.type === 'prepare') {
+      // Reconstruct missing movements for prepare transactions
+      if (trxMovs.length === 0) {
+        let targetPrepIng: Ingredient | undefined;
+        if (trx.notes) {
+          targetPrepIng = rawIngredients.find(
+            (i) => i.type === 'prepared' && trx.notes?.toLowerCase().includes(i.name.toLowerCase())
+          );
+        }
+        if (!targetPrepIng) {
+          targetPrepIng =
+            rawIngredients.find((i) => i.type === 'prepared' && (i.id === 'ing-ppb-kopsu' || i.name.toLowerCase().includes('kopsu'))) ||
+            rawIngredients.find((i) => i.type === 'prepared') ||
+            INITIAL_INGREDIENTS.find((i) => i.type === 'prepared');
+        }
+
+        if (targetPrepIng) {
+          const prepId = targetPrepIng.id;
+          const prepName = targetPrepIng.name;
+          let targetQty = 1000;
+          const qtyMatch = trx.notes ? trx.notes.match(/([\d.]+)\s*(?:ml|g|gram|kg|l|liter|unit)?/i) : null;
+          if (qtyMatch && parseFloat(qtyMatch[1]) > 0) {
+            targetQty = parseFloat(qtyMatch[1]);
+          }
+
+          const inMov: StockMovement = {
+            id: `mov-prep-in-${trx.id}`,
+            transaction_id: trx.id,
+            ingredient_id: prepId,
+            type: 'in',
+            quantity: targetQty,
+            balance_after: 0,
+            description: `Hasil Proses Prepare / Konversi ${prepName} (${trx.reference_no})`,
+            created_at: trx.transaction_date || trx.created_at || new Date().toISOString(),
+          };
+          runningMovements.push(inMov);
+
+          const formulaDetails = rawPrepareFormulas[prepId] || [];
+          if (formulaDetails.length > 0) {
+            formulaDetails.forEach((fd, fdIdx) => {
+              const rawIng = rawIngredients.find((i) => i.id === fd.ingredient_id);
+              const rawName = rawIng ? rawIng.name : 'Bahan Mentah';
+              const outQty = Number(fd.quantity) * (targetQty / 1000);
+              if (outQty > 0) {
+                const outMov: StockMovement = {
+                  id: `mov-prep-out-${trx.id}-${fdIdx}`,
+                  transaction_id: trx.id,
+                  ingredient_id: fd.ingredient_id,
+                  type: 'out',
+                  quantity: outQty,
+                  balance_after: 0,
+                  description: `Pemakaian Bahan Mentah (${rawName}) untuk Prepare ${prepName} (${trx.reference_no})`,
+                  created_at: trx.transaction_date || trx.created_at || new Date().toISOString(),
+                };
+                runningMovements.push(outMov);
+              }
+            });
+          } else {
+            const fallbackDetails = INITIAL_RECIPE_DETAILS.filter(
+              (rd) => rd.recipe_id.includes(prepId) || rd.recipe_id === `rec-prep-${prepId}`
+            );
+            fallbackDetails.forEach((fd, fdIdx) => {
+              const rawIng =
+                rawIngredients.find((i) => i.id === fd.ingredient_id) ||
+                INITIAL_INGREDIENTS.find((i) => i.id === fd.ingredient_id);
+              const rawName = rawIng ? rawIng.name : 'Bahan Mentah';
+              const outQty = Number(fd.quantity) * (targetQty / 1000);
+              if (outQty > 0) {
+                const outMov: StockMovement = {
+                  id: `mov-prep-out-${trx.id}-${fdIdx}`,
+                  transaction_id: trx.id,
+                  ingredient_id: fd.ingredient_id,
+                  type: 'out',
+                  quantity: outQty,
+                  balance_after: 0,
+                  description: `Pemakaian Bahan Mentah (${rawName}) untuk Prepare ${prepName} (${trx.reference_no})`,
+                  created_at: trx.transaction_date || trx.created_at || new Date().toISOString(),
+                };
+                runningMovements.push(outMov);
+              }
+            });
+          }
           repairedCount++;
         }
       }
@@ -181,7 +380,7 @@ export const reconcileHistoricalTransactionsAndMovements = (
   });
 
   // Combine and sort all movements chronologically ascending
-  const allMovements = [...existingMovements].sort((a, b) => {
+  const allMovements = [...runningMovements].sort((a, b) => {
     const timeA = new Date(a.created_at).getTime() || 0;
     const timeB = new Date(b.created_at).getTime() || 0;
     if (timeA !== timeB) return timeA - timeB;
@@ -1354,35 +1553,22 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     // 0. Auto-reconcile historical stock deductions and standardize categories on mount
     try {
-      const hasUnreconciled = transactions.some((t) => {
-        if (t.type !== 'production') return false;
-        const movs = stockMovements.filter(
-          (m) =>
-            m.transaction_id === t.id ||
-            (t.reference_no && m.description && m.description.includes(t.reference_no))
-        );
-        return movs.length === 0;
-      });
-
-      const hasUnnormalizedCategories = ingredients.some(
-        (ing) => ing.category_id !== normalizeIngredientCategory(ing)
+      const {
+        reconciledTransactions,
+        reconciledMovements,
+        reconciledIngredients,
+        repairedCount,
+      } = reconcileHistoricalTransactionsAndMovements(
+        transactions,
+        stockMovements,
+        ingredients,
+        recipeDetails,
+        recipes,
+        menus,
+        prepareFormulas
       );
 
-      if (hasUnreconciled || hasUnnormalizedCategories) {
-        const {
-          reconciledTransactions,
-          reconciledMovements,
-          reconciledIngredients,
-        } = reconcileHistoricalTransactionsAndMovements(
-          transactions,
-          stockMovements,
-          ingredients,
-          recipeDetails,
-          recipes,
-          menus,
-          prepareFormulas
-        );
-
+      if (repairedCount > 0 || reconciledIngredients.some((ing, idx) => ing.current_stock !== ingredients[idx]?.current_stock || ing.category_id !== ingredients[idx]?.category_id)) {
         setTransactions(reconciledTransactions);
         setStockMovements(reconciledMovements);
         setIngredients(reconciledIngredients);
