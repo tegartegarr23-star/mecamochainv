@@ -1855,22 +1855,41 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ initialActio
                         const ingName = adjIng ? adjIng.name : 'Bahan';
                         const unit = units.find((u) => u.id === adjIng?.unit_id);
                         const moveType = m.type === 'in' ? '+' : '-';
+                        const isZeroQty = !m.quantity || m.quantity === 0;
+
                         detailContent = (
                           <div className="space-y-0.5">
                             <div className="font-bold text-stone-900 flex items-center gap-1.5 flex-wrap">
                               <span>⚖️ Penyesuaian: {ingName}</span>
                               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                                m.type === 'in'
-                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                  : 'bg-rose-50 text-rose-800 border-rose-200'
+                                isZeroQty
+                                  ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                  : m.type === 'in'
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                    : 'bg-rose-50 text-rose-800 border-rose-200'
                               }`}>
-                                {moveType}{formatNumber(m.quantity || 0)} {unit?.abbreviation || 'unit'}
+                                {isZeroQty
+                                  ? `Stok Sesuai (${formatNumber(m.balance_after || 0)} ${unit?.abbreviation || 'unit'})`
+                                  : `${moveType}${formatNumber(m.quantity || 0)} ${unit?.abbreviation || 'unit'}`
+                                }
                               </span>
                               <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
                                 {trx.adjustment_reason || 'Opname'}
                               </span>
                             </div>
                             {trx.notes && <p className="text-[11px] text-stone-500 italic">{trx.notes}</p>}
+                          </div>
+                        );
+                      } else if (trx.adjustment_items && trx.adjustment_items.length > 0) {
+                        detailContent = (
+                          <div className="space-y-0.5">
+                            <div className="font-bold text-stone-900 flex items-center gap-1.5 flex-wrap">
+                              <span>⚖️ Penyesuaian: {trx.adjustment_items.length} Bahan Baku</span>
+                              <span className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
+                                {trx.adjustment_reason || 'Opname'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-stone-500 italic">{trx.notes || 'Penyesuaian stok bahan'}</p>
                           </div>
                         );
                       } else {

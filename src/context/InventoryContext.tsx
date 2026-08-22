@@ -418,6 +418,58 @@ export const reconcileHistoricalTransactionsAndMovements = (
           repairedCount++;
         }
       }
+    } else if (trx.type === 'adjustment') {
+      // Reconstruct missing movements for adjustment / stock opname transactions
+      if (trxMovs.length === 0 && trx.adjustment_items && Array.isArray(trx.adjustment_items) && trx.adjustment_items.length > 0) {
+        let adjIdx = 0;
+        trx.adjustment_items.forEach((item) => {
+          const ing = rawIngredients.find(
+            (i) => String(i.id).toLowerCase() === String(item.ingredient_id).toLowerCase() ||
+                   String(i.code).toLowerCase() === String(item.ingredient_id).toLowerCase()
+          );
+          if (ing) {
+            const qty = Math.max(0, Number(item.quantity) || 0);
+            const moveType = item.mode === 'plus' ? 'in' : item.mode === 'minus' ? 'out' : (qty > 0 ? 'in' : 'in');
+            const newMov: StockMovement = {
+              id: `mov-adj-reconciled-${trx.id}-${adjIdx++}`,
+              transaction_id: trx.id,
+              ingredient_id: ing.id,
+              type: moveType,
+              quantity: qty,
+              balance_after: qty,
+              description: item.mode === 'set'
+                ? `Stock Opname ${ing.name}: set ${qty} (${trx.adjustment_reason || 'Opname'}) (${trx.reference_no})`
+                : `Penyesuaian Stok ${item.mode === 'plus' ? '+' : '-'}${qty} ${ing.name} (${trx.adjustment_reason || 'Penyesuaian'}) (${trx.reference_no})`,
+              created_at: trx.transaction_date || trx.created_at || new Date().toISOString(),
+            };
+            runningMovements.push(newMov);
+          }
+        });
+        repairedCount++;
+      } else if (trxMovs.length === 0 && trx.notes) {
+        // Attempt parsing ingredient from notes
+        for (const ing of rawIngredients) {
+          if (trx.notes.toLowerCase().includes(ing.name.toLowerCase())) {
+            const qtyMatch = trx.notes.match(/([\d.]+)/);
+            const qty = qtyMatch ? parseFloat(qtyMatch[1]) : (Number(ing.current_stock) || 0);
+            if (qty >= 0) {
+              const newMov: StockMovement = {
+                id: `mov-adj-reconciled-${trx.id}-0`,
+                transaction_id: trx.id,
+                ingredient_id: ing.id,
+                type: 'in',
+                quantity: qty,
+                balance_after: qty,
+                description: `Penyesuaian Stok ${ing.name}: ${qty} (${trx.adjustment_reason || 'Opname'}) (${trx.reference_no})`,
+                created_at: trx.transaction_date || trx.created_at || new Date().toISOString(),
+              };
+              runningMovements.push(newMov);
+              repairedCount++;
+              break;
+            }
+          }
+        }
+      }
     }
 
     return trx;
@@ -442,8 +494,18 @@ export const reconcileHistoricalTransactionsAndMovements = (
       const mId = String(m.ingredient_id || '').trim().toLowerCase();
       return mId === idKey || (codeKey && mId === codeKey);
     });
-    const hasInitialIn = ingMovs.some((m) => m.type === 'in');
-    const baseStock = hasInitialIn ? 0 : Math.max(0, Number(ing.current_stock) || 0);
+
+    const sortedIngMovs = [...ingMovs].sort((a, b) => {
+      const timeA = new Date(a.created_at).getTime() || 0;
+      const timeB = new Date(b.created_at).getTime() || 0;
+      if (timeA !== timeB) return timeA - timeB;
+      return String(a.id).localeCompare(String(b.id));
+    });
+
+    const firstMov = sortedIngMovs[0];
+    const isFirstIn = firstMov && firstMov.type === 'in' && Number(firstMov.quantity) > 0;
+    const baseStock = isFirstIn ? 0 : Math.max(0, Number(ing.current_stock) || 0);
+
     if (idKey) runningStock.set(idKey, baseStock);
     if (codeKey) runningStock.set(codeKey, baseStock);
   });
@@ -3067,7 +3129,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   };
 
-  // Helper to get actual current stock based on running sum and latest balance_after
+  // Helper to get actual current stock based on running sum and movements
   const getIngredientCurrentStock = (ing: Ingredient, movements: StockMovement[]): number => {
     if (!ing) return 0;
     const ingId = String(ing.id || '').trim().toLowerCase();
@@ -3076,7 +3138,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const isIngMatch = (m: StockMovement) => {
       if (!m || !m.ingredient_id) return false;
       const mId = (typeof m.ingredient_id === 'object' && m.ingredient_id !== null ? String((m.ingredient_id as any).id || '') : String(m.ingredient_id || '')).trim().toLowerCase();
-      return mId === ingId || mId === ingCode;
+      return mId === ingId || (ingCode !== '' && mId === ingCode);
     };
 
     const ingMovs = movements.filter(isIngMatch);
@@ -3090,20 +3152,18 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return String(a.id).localeCompare(String(b.id));
       });
 
-      const latest = sortedMovs[sortedMovs.length - 1];
-      if (latest && latest.balance_after !== undefined && latest.balance_after !== null && !isNaN(Number(latest.balance_after)) && Number(latest.balance_after) >= 0) {
-        return Number(latest.balance_after);
-      }
-
-      // Check if there is an explicit initial 'in' movement. If not, starting baseline is ing.current_stock
-      const hasInitialIn = sortedMovs.some((m) => m.type === 'in');
-      const baseline = hasInitialIn ? 0 : Math.max(0, Number(ing.current_stock) || 0);
+      const firstMov = sortedMovs[0];
+      const isFirstIn = firstMov && firstMov.type === 'in' && Number(firstMov.quantity) > 0;
+      const baseline = isFirstIn ? 0 : Math.max(0, Number(ing.current_stock) || 0);
 
       let running = baseline;
       sortedMovs.forEach((m) => {
         const q = Number(m.quantity) || 0;
-        if (m.type === 'in') running += q;
-        else if (m.type === 'out') running -= q;
+        if (m.type === 'in') {
+          running += q;
+        } else if (m.type === 'out') {
+          running = Math.max(0, running - q);
+        }
       });
       return Math.max(0, running);
     }
@@ -3143,16 +3203,43 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const isoDate = createLocalDateTimeIso(date);
     const targetTimestamp = new Date(isoDate).getTime();
-
     const targetDateYMD = getYYYYMMDD(date);
+
+    const itemSummaries: string[] = [];
+    items.forEach((item) => {
+      const targetId = String(item.ingredient_id || '').trim().toLowerCase();
+      const ing = ingredients.find(
+        (i) => String(i.id).trim().toLowerCase() === targetId || String(i.code || '').trim().toLowerCase() === targetId
+      );
+      if (ing) {
+        const u = units.find((un) => un.id === ing.unit_id);
+        const uName = u ? u.abbreviation : 'unit';
+        if (item.mode === 'set') {
+          itemSummaries.push(`${ing.name}: set ${item.quantity} ${uName}`);
+        } else if (item.mode === 'plus') {
+          itemSummaries.push(`${ing.name}: +${item.quantity} ${uName}`);
+        } else {
+          itemSummaries.push(`${ing.name}: -${item.quantity} ${uName}`);
+        }
+      }
+    });
+
+    const defaultNotes = itemSummaries.length > 0 ? itemSummaries.join(', ') : `Penyesuaian stok ${items.length} bahan (${reason})`;
+    const finalNotes = notes ? `${notes} (${defaultNotes})` : defaultNotes;
 
     const newTrx: Transaction = {
       id: trxId,
       type: 'adjustment',
       transaction_date: isoDate,
       reference_no: refNo,
-      notes: notes || `Penyesuaian stok ${items.length} bahan (${reason})`,
+      notes: finalNotes,
       adjustment_reason: reason,
+      adjustment_items: items.map((i) => ({
+        ingredient_id: i.ingredient_id,
+        quantity: Number(i.quantity) || 0,
+        mode: i.mode,
+        item_notes: i.item_notes,
+      })),
       created_by: currentUser.name,
       created_at: new Date(now).toISOString(),
     };
@@ -3199,7 +3286,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const isIngMatch = (m: StockMovement) => {
         if (!m || !m.ingredient_id) return false;
         const mId = (typeof m.ingredient_id === 'object' && m.ingredient_id !== null ? String((m.ingredient_id as any).id || '') : String(m.ingredient_id || '')).trim().toLowerCase();
-        return mId === realIngId.toLowerCase() || mId === realIngCode;
+        return mId === realIngId.toLowerCase() || (realIngCode !== '' && mId === realIngCode);
       };
 
       // 1. Calculate stock balance of this ingredient up to this adjustment's target date
@@ -3212,11 +3299,21 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return false;
       });
 
-      let stockPriorOnDate = 0;
-      priorMovs.forEach((m) => {
+      const sortedPrior = [...priorMovs].sort((a, b) => {
+        const timeA = new Date(a.created_at).getTime() || 0;
+        const timeB = new Date(b.created_at).getTime() || 0;
+        if (timeA !== timeB) return timeA - timeB;
+        return String(a.id).localeCompare(String(b.id));
+      });
+
+      const firstPriorIn = sortedPrior[0] && sortedPrior[0].type === 'in' && Number(sortedPrior[0].quantity) > 0;
+      const priorBaseline = firstPriorIn ? 0 : Math.max(0, Number(ing.current_stock) || 0);
+
+      let stockPriorOnDate = priorBaseline;
+      sortedPrior.forEach((m) => {
         const q = Number(m.quantity) || 0;
         if (m.type === 'in') stockPriorOnDate += q;
-        else if (m.type === 'out') stockPriorOnDate -= q;
+        else if (m.type === 'out') stockPriorOnDate = Math.max(0, stockPriorOnDate - q);
       });
 
       const qty = Math.max(0, Number(item.quantity) || 0);
@@ -3230,8 +3327,22 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         // Stock Opname: Setting physical stock on target date to target qty
         delta = qty - stockPriorOnDate;
         balanceAfterOnDate = qty;
-        moveType = delta >= 0 ? 'in' : 'out';
-        moveQty = Math.abs(delta);
+        if (delta > 0) {
+          moveType = 'in';
+          moveQty = delta;
+        } else if (delta < 0) {
+          moveType = 'out';
+          moveQty = Math.abs(delta);
+        } else {
+          // delta === 0 (matching physical stock)
+          if (sortedPrior.length === 0 && qty > 0) {
+            moveType = 'in';
+            moveQty = qty;
+          } else {
+            moveType = 'in';
+            moveQty = 0;
+          }
+        }
       } else if (item.mode === 'plus') {
         delta = qty;
         balanceAfterOnDate = stockPriorOnDate + qty;
@@ -3240,14 +3351,16 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } else {
         // 'minus'
         delta = -qty;
-        balanceAfterOnDate = stockPriorOnDate - qty;
+        balanceAfterOnDate = Math.max(0, stockPriorOnDate - qty);
         moveType = 'out';
         moveQty = qty;
       }
 
       const itemDesc = item.mode === 'set'
-        ? `Stock Opname: ${stockPriorOnDate} -> ${balanceAfterOnDate} (${item.item_notes || reason}) (${refNo})`
-        : `Penyesuaian Stok (${moveType === 'in' ? '+' : '-'}) Alasan: ${reason} - ${item.item_notes || notes} (${refNo})`;
+        ? (moveQty === 0 && delta === 0
+            ? `Stock Opname ${ing.name}: ${stockPriorOnDate} -> ${balanceAfterOnDate} (Stok Sesuai Buku) (${refNo})`
+            : `Stock Opname ${ing.name}: ${stockPriorOnDate} -> ${balanceAfterOnDate} (${item.item_notes || reason}) (${refNo})`)
+        : `Penyesuaian Stok (${moveType === 'in' ? '+' : '-'}) ${ing.name} Alasan: ${reason} - ${item.item_notes || notes} (${refNo})`;
 
       const movTimestamp = new Date(targetTimestamp + index * 10).toISOString();
       const newMov: StockMovement = {
@@ -3270,7 +3383,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             if (mDate > targetDateYMD || (mDate === targetDateYMD && new Date(m.created_at).getTime() > targetTimestamp)) {
               return {
                 ...m,
-                balance_after: (Number(m.balance_after) || 0) + delta,
+                balance_after: Math.max(0, (Number(m.balance_after) || 0) + delta),
               };
             }
           }
@@ -3282,7 +3395,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const currentLive = Number(ing.current_stock) || 0;
       updatedIngredients[ingIndex] = {
         ...ing,
-        current_stock: currentLive + delta,
+        current_stock: Math.max(0, currentLive + delta),
       };
     });
 
@@ -3585,26 +3698,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
 
       // Calculate baseline initial stock before all movements started
-      let baselineInitialStock = Math.max(0, Number(ing.current_stock) || 0);
-      if (sortedIngMovs.length > 0) {
-        const hasInitialIn = sortedIngMovs.some((m) => m.type === 'in');
-        if (hasInitialIn) {
-          const firstMov = sortedIngMovs[0];
-          if (firstMov.balance_after !== undefined && firstMov.balance_after !== null && !isNaN(Number(firstMov.balance_after)) && Number(firstMov.balance_after) >= 0) {
-            const fQty = Number(firstMov.quantity) || 0;
-            const fType = String(firstMov.type || '').toLowerCase();
-            baselineInitialStock = Math.max(0, fType === 'in' ? Number(firstMov.balance_after) - fQty : Number(firstMov.balance_after) + fQty);
-          } else {
-            let totalNet = 0;
-            sortedIngMovs.forEach((m) => {
-              const q = Number(m.quantity) || 0;
-              if (String(m.type).toLowerCase() === 'in') totalNet += q;
-              else totalNet -= q;
-            });
-            baselineInitialStock = Math.max(0, liveStock - totalNet);
-          }
-        }
-      }
+      const firstMov = sortedIngMovs[0];
+      const isFirstIn = firstMov && firstMov.type === 'in' && Number(firstMov.quantity) > 0;
+      const baselineInitialStock = isFirstIn ? 0 : Math.max(0, Number(ing.current_stock) || 0);
 
       // Movements on targetDate or all dates
       const movementsToday = sortedIngMovs.filter((m) => {
@@ -3677,18 +3773,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         // In all dates mode, initial stock is baseline stock before any movements
         initial_stock = Math.max(0, baselineInitialStock);
       } else if (movementsBefore.length > 0) {
-        const lastBefore = movementsBefore[movementsBefore.length - 1];
-        if (lastBefore.balance_after !== undefined && lastBefore.balance_after !== null && !isNaN(Number(lastBefore.balance_after)) && Number(lastBefore.balance_after) >= 0) {
-          initial_stock = Number(lastBefore.balance_after);
-        } else {
-          let runningStock = baselineInitialStock;
-          movementsBefore.forEach((m) => {
-            const q = Number(m.quantity) || 0;
-            if (String(m.type).toLowerCase() === 'in') runningStock += q;
-            else runningStock -= q;
-          });
-          initial_stock = Math.max(0, runningStock);
-        }
+        let runningStock = baselineInitialStock;
+        movementsBefore.forEach((m) => {
+          const q = Number(m.quantity) || 0;
+          if (String(m.type).toLowerCase() === 'in') runningStock += q;
+          else runningStock = Math.max(0, runningStock - q);
+        });
+        initial_stock = Math.max(0, runningStock);
       } else {
         initial_stock = Math.max(0, baselineInitialStock);
       }

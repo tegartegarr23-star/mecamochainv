@@ -84,6 +84,7 @@ export interface Transaction {
   menu_id?: string; // For production (primary/legacy)
   portion_count?: number; // For production (total portions)
   production_items?: ProductionItemInput[]; // For multi-menu production
+  adjustment_items?: AdjustmentItemInput[]; // For adjustment transactions
   adjustment_reason?: 'Loss' | 'Damage' | 'Expired' | 'Stock Opname' | 'Other'; // For adjustment
   created_at: string;
 }
