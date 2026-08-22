@@ -433,11 +433,26 @@ export const reconcileHistoricalTransactionsAndMovements = (
 
   // Calculate sequential running stock balances
   const runningStock = new Map<string, number>();
+
+  // Determine initial baseline stock per ingredient from rawIngredients
+  rawIngredients.forEach((ing) => {
+    const idKey = String(ing.id).trim().toLowerCase();
+    const codeKey = String(ing.code || '').trim().toLowerCase();
+    const ingMovs = allMovements.filter((m) => {
+      const mId = String(m.ingredient_id || '').trim().toLowerCase();
+      return mId === idKey || (codeKey && mId === codeKey);
+    });
+    const hasInitialIn = ingMovs.some((m) => m.type === 'in');
+    const baseStock = hasInitialIn ? 0 : Math.max(0, Number(ing.current_stock) || 0);
+    if (idKey) runningStock.set(idKey, baseStock);
+    if (codeKey) runningStock.set(codeKey, baseStock);
+  });
+
   const finalMovements = allMovements.map((mov) => {
     const ingKey = String(mov.ingredient_id).trim().toLowerCase();
     const current = runningStock.get(ingKey) || 0;
     const qty = Number(mov.quantity) || 0;
-    const nextBal = mov.type === 'in' ? current + qty : current - qty;
+    const nextBal = Math.max(0, mov.type === 'in' ? current + qty : current - qty);
     runningStock.set(ingKey, nextBal);
     return {
       ...mov,
@@ -451,12 +466,12 @@ export const reconcileHistoricalTransactionsAndMovements = (
     const codeKey = String(ing.code || '').trim().toLowerCase();
     const computedStock = runningStock.has(idKey)
       ? runningStock.get(idKey)!
-      : (codeKey && runningStock.has(codeKey) ? runningStock.get(codeKey)! : (Number(ing.current_stock) || 0));
+      : (codeKey && runningStock.has(codeKey) ? runningStock.get(codeKey)! : Math.max(0, Number(ing.current_stock) || 0));
 
     return {
       ...ing,
       category_id: normalizeIngredientCategory(ing),
-      current_stock: computedStock,
+      current_stock: Math.max(0, computedStock),
     };
   });
 
@@ -3076,19 +3091,23 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
 
       const latest = sortedMovs[sortedMovs.length - 1];
-      if (latest && latest.balance_after !== undefined && latest.balance_after !== null && !isNaN(Number(latest.balance_after))) {
+      if (latest && latest.balance_after !== undefined && latest.balance_after !== null && !isNaN(Number(latest.balance_after)) && Number(latest.balance_after) >= 0) {
         return Number(latest.balance_after);
       }
 
-      let running = 0;
+      // Check if there is an explicit initial 'in' movement. If not, starting baseline is ing.current_stock
+      const hasInitialIn = sortedMovs.some((m) => m.type === 'in');
+      const baseline = hasInitialIn ? 0 : Math.max(0, Number(ing.current_stock) || 0);
+
+      let running = baseline;
       sortedMovs.forEach((m) => {
         const q = Number(m.quantity) || 0;
         if (m.type === 'in') running += q;
         else if (m.type === 'out') running -= q;
       });
-      return running;
+      return Math.max(0, running);
     }
-    return Number(ing.current_stock) || 0;
+    return Math.max(0, Number(ing.current_stock) || 0);
   };
 
   const addAdjustmentTransaction = (
@@ -3566,21 +3585,24 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
 
       // Calculate baseline initial stock before all movements started
-      let baselineInitialStock = liveStock;
+      let baselineInitialStock = Math.max(0, Number(ing.current_stock) || 0);
       if (sortedIngMovs.length > 0) {
-        const firstMov = sortedIngMovs[0];
-        if (firstMov.balance_after !== undefined && firstMov.balance_after !== null && !isNaN(Number(firstMov.balance_after))) {
-          const fQty = Number(firstMov.quantity) || 0;
-          const fType = String(firstMov.type || '').toLowerCase();
-          baselineInitialStock = fType === 'in' ? Number(firstMov.balance_after) - fQty : Number(firstMov.balance_after) + fQty;
-        } else {
-          let totalNet = 0;
-          sortedIngMovs.forEach((m) => {
-            const q = Number(m.quantity) || 0;
-            if (String(m.type).toLowerCase() === 'in') totalNet += q;
-            else totalNet -= q;
-          });
-          baselineInitialStock = liveStock - totalNet;
+        const hasInitialIn = sortedIngMovs.some((m) => m.type === 'in');
+        if (hasInitialIn) {
+          const firstMov = sortedIngMovs[0];
+          if (firstMov.balance_after !== undefined && firstMov.balance_after !== null && !isNaN(Number(firstMov.balance_after)) && Number(firstMov.balance_after) >= 0) {
+            const fQty = Number(firstMov.quantity) || 0;
+            const fType = String(firstMov.type || '').toLowerCase();
+            baselineInitialStock = Math.max(0, fType === 'in' ? Number(firstMov.balance_after) - fQty : Number(firstMov.balance_after) + fQty);
+          } else {
+            let totalNet = 0;
+            sortedIngMovs.forEach((m) => {
+              const q = Number(m.quantity) || 0;
+              if (String(m.type).toLowerCase() === 'in') totalNet += q;
+              else totalNet -= q;
+            });
+            baselineInitialStock = Math.max(0, liveStock - totalNet);
+          }
         }
       }
 
@@ -3656,7 +3678,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         initial_stock = Math.max(0, baselineInitialStock);
       } else if (movementsBefore.length > 0) {
         const lastBefore = movementsBefore[movementsBefore.length - 1];
-        if (lastBefore.balance_after !== undefined && lastBefore.balance_after !== null && !isNaN(Number(lastBefore.balance_after))) {
+        if (lastBefore.balance_after !== undefined && lastBefore.balance_after !== null && !isNaN(Number(lastBefore.balance_after)) && Number(lastBefore.balance_after) >= 0) {
           initial_stock = Number(lastBefore.balance_after);
         } else {
           let runningStock = baselineInitialStock;
@@ -3665,7 +3687,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             if (String(m.type).toLowerCase() === 'in') runningStock += q;
             else runningStock -= q;
           });
-          initial_stock = runningStock;
+          initial_stock = Math.max(0, runningStock);
         }
       } else {
         initial_stock = Math.max(0, baselineInitialStock);
@@ -3673,7 +3695,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       // Stock at the end of targetDate:
       // Exactly equals initial_stock + total today in - total today out (carries over seamlessly)
-      const final_stock = isAllDates ? liveStock : initial_stock + totalTodayIn - totalTodayOut;
+      const final_stock = isAllDates ? liveStock : Math.max(0, initial_stock + totalTodayIn - totalTodayOut);
 
       return {
         ingredient: { ...ing, current_stock: liveStock },
